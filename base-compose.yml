@@ -17,6 +17,11 @@ services:
             context: agents/python3
             dockerfile: Dockerfile
 
+    python3_1-agent:
+        build:
+            context: agents/python3_1
+            dockerfile: Dockerfile
+
     python3-agent-dev:
         build:
             context: agents/python3

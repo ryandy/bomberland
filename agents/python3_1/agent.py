@@ -1,4 +1,3 @@
-from typing import Union
 from game_state import GameState
 import asyncio
 import random
@@ -9,6 +8,7 @@ uri = os.environ.get(
     'GAME_CONNECTION_STRING') or "ws://127.0.0.1:3000/?role=agent&agentId=agentId&name=defaultName"
 
 actions = ["up", "down", "left", "right", "bomb", "detonate"]
+actions = ["detonate"]
 
 
 class Agent():
@@ -26,38 +26,37 @@ class Agent():
         loop.run_until_complete(asyncio.wait(tasks))
 
     # returns coordinates of the first bomb placed by a unit
-    def _get_bomb_to_detonate(self, unit) -> Union[int, int] or None:
-        entities = self._client._state.get("entities")
-        bombs = list(filter(lambda entity: entity.get(
-            "unit_id") == unit and entity.get("type") == "b", entities))
+    def _get_bomb_to_detonate(self, unit_id):
+        entities = self._client.board.cells
+        bombs = list(filter(lambda entity: entity.unit and entity.unit.id == unit_id
+            and entity.bomb is not None, entities))
         bomb = next(iter(bombs or []), None)
         if bomb != None:
-            return [bomb.get("x"), bomb.get("y")]
+            return [bomb.x, bomb.y]
         else:
             return None
 
-    async def _on_game_tick(self, tick_number, game_state):
+    async def _on_game_tick(self, board):
 
         # get my units
-        my_agent_id = game_state.get("connection").get("agent_id")
-        my_units = game_state.get("agents").get(my_agent_id).get("unit_ids")
+        my_units = board.player.units
 
         # send each unit a random action
-        for unit_id in my_units:
+        for unit in my_units:
 
             action = random.choice(actions)
 
             if action in ["up", "left", "right", "down"]:
-                await self._client.send_move(action, unit_id)
+                await self._client.send_move(action, unit.id)
             elif action == "bomb":
-                await self._client.send_bomb(unit_id)
+                await self._client.send_bomb(unit.id)
             elif action == "detonate":
-                bomb_coordinates = self._get_bomb_to_detonate(unit_id)
+                bomb_coordinates = self._get_bomb_to_detonate(unit.id)
                 if bomb_coordinates != None:
                     x, y = bomb_coordinates
-                    await self._client.send_detonate(x, y, unit_id)
+                    await self._client.send_detonate(x, y, unit.id)
             else:
-                print(f"Unhandled action: {action} for unit {unit_id}")
+                print(f"Unhandled action: {action} for unit {unit.id}")
 
 
 def main():
