@@ -6,7 +6,6 @@ services:
             - type: "bind"
               source: ./agents/replay.json
               target: /app/replay.json
-
     go-agent:
         build:
             context: agents/go
@@ -25,10 +24,19 @@ services:
     python3_2-agent:
         build:
             context: agents/python3_2
-            #dockerfile: Dockerfile
-            dockerfile: Dockerfile.dev # ra
-        volumes: # ra
-            - ./agents/python3_2:/app #ra
+            dockerfile: Dockerfile
+        #    dockerfile: Dockerfile.dev # ra
+        #volumes: # ra
+        #    - ./agents/python3_2:/app #ra
+
+    python3_3-agent:
+        build:
+            context: agents/python3_3
+            dockerfile: Dockerfile
+        #    dockerfile: Dockerfile.dev # ra
+        #volumes: # ra
+        #    - ./agents/python3_3:/app #ra
+
 
     python3-agent-dev:
         build:
@@ -36,12 +44,10 @@ services:
             dockerfile: Dockerfile.dev
         volumes:
             - ./agents/python3:/app
-
     python3-fwd:
         build:
             context: agents/python3
             dockerfile: Dockerfile.fwd
-
     python3-fwd-dev:
         build:
             context: agents/python3
@@ -54,24 +60,20 @@ services:
             dockerfile: Dockerfile.gym.dev
         volumes:
             - ./agents/python3:/app
-
     typescript-agent:
         build:
             context: agents/typescript
             dockerfile: Dockerfile
-
     typescript-agent-dev:
         build:
             context: agents/typescript
             dockerfile: Dockerfile.dev
         volumes:
             - ./agents/typescript:/app
-
     cpp-agent:
         build:
             context: agents/cpp
             dockerfile: Dockerfile
-
     rust-agent:
         build:
             context: agents/rust
