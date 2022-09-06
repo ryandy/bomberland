@@ -40,15 +40,11 @@ def assign_goals(board, units):
     while units:
         max_score, max_score_cell, max_score_unit = -1, None, None
         for unit in units:
-            #print(unit.id, unit.goal_list)
             for score, cell in unit.goal_list:
-                #print(unit.id, score, max_score, score > max_score, goal_cells, cell in goal_cells)
                 if score > max_score and not cell in goal_cells:
-                    #if max_score > 0:
-                    #    print(f'RMA Unit {unit.id} has score {score} for cell {cell.x},{cell.y}')
                     max_score, max_score_cell, max_score_unit = score, cell, unit
                     break # Best goal possible for this unit, break out to go to next unit list
-        #print(max_score)
+        print(f'Unit {max_score_unit.id} goal {max_score_cell.x},{max_score_cell.y}: score={max_score}, dist={max_score_cell.dists[unit.id]}')
         max_score_unit.goal_cell = max_score_cell
         goal_cells.append(max_score_cell)
         units.remove(max_score_unit)
@@ -71,7 +67,7 @@ class Agent():
             init_center_dist = abs(cell.x - 7) + abs(cell.y - 7)
             init_goal_dist = unit.goal_cell.dists[unit.id][0]
             for move_cell in cell.move_neighbors():
-                goal_dist = init_goal_dist if move_cell is cell else move_cell.get_dist(unit.goal_cell)
+                goal_dist = init_goal_dist if move_cell is cell else move_cell.get_dist(unit.goal_cell, unit.player)
                 center_dist = abs(move_cell.x - 7) + abs(move_cell.y - 7)
 
                 move_score = 0
@@ -79,9 +75,12 @@ class Agent():
                     move_score += 100
                 if goal_dist < init_goal_dist:
                     move_score += 10
+                if goal_dist > init_goal_dist:
+                    move_score -= 10
                 #if center_dist > init_center_dist:
                 #    move_score += 1
-                if move_cell.future_fire_start: # TODO: Analyze couple steps of path to determine safety
+                # TODO: Analyze couple steps of path to determine safety
+                if move_cell.future_fire_start and (move_cell.future_fire_start <= board.tick + 1 < move_cell.future_fire_end):
                     move_score -= 1000
                 if (move_cell.fire
                     and move_cell.expires > board.tick + 1     # Still on fire next turn
@@ -90,6 +89,18 @@ class Agent():
                 move_scores.append((move_cell, move_score))
                 #print(f'Unit {unit.id} move {cell.x},{cell.y} to {move_cell.x},{move_cell.y} dist change from {init_goal_dist} to {goal_dist}. move_score={move_score} (goal at {unit.goal_cell.x},{unit.goal_cell.y})')
             move_scores.sort(key=lambda x: x[1], reverse=True)
+
+            actions = {
+                cell: None,
+                cell.west:  'left',
+                cell.east:  'right',
+                cell.north: 'up',
+                cell.south: 'down',
+            }
+            
+            for i, (move_cell, move_score) in enumerate(move_scores):
+                prefix = '!' if i == 0 else ''
+                print(f'{prefix}Unit {unit.id} move {actions[move_cell]}: score={move_score}')
 
             move_cell, move_score = move_scores[0]
             action = {

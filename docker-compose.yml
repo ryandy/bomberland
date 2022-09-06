@@ -7,17 +7,17 @@ services:
         ports:
             - 3000:3000
         environment:
-            - ADMIN_ROLE_ENABLED=0
-            #- ADMIN_ROLE_ENABLED=1 # ra
+            #- ADMIN_ROLE_ENABLED=0
+            - ADMIN_ROLE_ENABLED=1 # ra
             - AGENT_ID_MAPPING=agentA,agentB
             - INITIAL_HP=3
             - PRNG_SEED=1234
-            - SHUTDOWN_ON_GAME_END_ENABLED=1
-            #- SHUTDOWN_ON_GAME_END_ENABLED=0 # ra
+            #- SHUTDOWN_ON_GAME_END_ENABLED=1
+            - SHUTDOWN_ON_GAME_END_ENABLED=0 # ra
             - TELEMETRY_ENABLED=1
             - TICK_RATE_HZ=10
-            - TRAINING_MODE_ENABLED=0
-            #- TRAINING_MODE_ENABLED=1 # ra
+            #- TRAINING_MODE_ENABLED=0
+            - TRAINING_MODE_ENABLED=1 # ra
             - WORLD_SEED=1234
         deploy:
             resources:

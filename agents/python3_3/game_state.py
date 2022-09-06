@@ -20,8 +20,9 @@ class Cell:
         self.y = position // SIZE
         self.west, self.north, self.east, self.south = None, None, None, None
         self.dists = {} # {unit_id: (dist, prev_cell)}
+        self.box_range = [0, 0, 0, 0] # number of boxes within range 1, 2, 3, 4 # TODO: by hp too?
         self.unit = None
-        self.score = 0
+        self.score = [0, 0, 0, 0] # indexed by ((unit.blast_diameter // 2) - 1)
         self.hp = 0
         self.wall = False # Only true for indestructible walls
         self.box = False # Only true for destructible wooden/ore blocks
@@ -32,6 +33,7 @@ class Cell:
         self.fire = None # bool
         self.blast_powerup = None
         self.freeze_powerup = None
+        # TODO: future_fire_start/expires['a'] and future_fire_start/expires['b']
         self.future_fire_start = None # tick that fire may start
         self.future_fire_end = None # tick that fire may last until
 
@@ -55,17 +57,17 @@ class Cell:
             return self.board.cell(x, y)
         return None
 
-    def search_neighbors(self):
+    def search_neighbors(self, player):
         cells = random.sample([self.north, self.east, self.south, self.west], 4)
         return [cell for cell in cells
-                if cell and not cell.wall and not cell.unit]
+                if cell and not cell.wall and (not cell.unit or cell.unit.player is player)]
 
     def move_neighbors(self):
         cells = random.sample([self.north, self.east, self.south, self.west, self], 5)
         return [cell for cell in cells
                 if cell and not cell.wall and not cell.bomb and not cell.box]
 
-    def get_dist(self, other_cell):
+    def get_dist(self, other_cell, player):
         temp_id = 'temp'
         for cell in self.board.cells:
             cell.dists[temp_id] = (UNREACHABLE, None)
@@ -76,22 +78,22 @@ class Cell:
             dist, _, cell = heapq.heappop(queue)
             if cell is other_cell:
                 return dist
-            if dist > cell.dists[temp_id][0]:
-                continue
-            for new_cell in cell.search_neighbors():
-                new_dist = dist + 1 + 6*new_cell.hp if new_cell.box else dist + 1
-                if new_cell.future_fire_end:
-                    new_dist = max(new_dist, new_cell.future_fire_end - self.board.tick)
+            for new_cell in cell.search_neighbors(player):
+                new_dist = dist + 1
+                if new_cell.box:
+                    new_dist += 6 * new_cell.hp
+
+                arrival_tick = self.board.tick + new_dist
+                if (new_cell.future_fire_end
+                    and new_cell.future_fire_start <= arrival_tick < new_cell.future_fire_end):
+                    new_dist = new_cell.future_fire_end - self.board.tick
+
                 if new_dist < new_cell.dists[temp_id][0]:
                     new_cell.dists[temp_id] = (new_dist, cell)
                     heapq.heappush(queue, (new_dist, random.random(), new_cell))
         return UNREACHABLE
 
-    def _update_dists_to_all(self, unit_id):
-        #if not self.unit or self.unit.id != unit_id:
-        #    print(unit_id, self.unit, self.board.units[unit_id].cell.x, self.board.units[unit_id].cell.y, self.x, self.y)
-        #    if self.unit:
-        #        print(unit_id, self.unit.id)
+    def _update_dists_to_all(self, unit_id, player):
         assert self.unit and self.unit.id == unit_id
 
         for cell in self.board.cells:
@@ -101,12 +103,16 @@ class Cell:
         queue = [(0, 0, self)]
         while queue:
             dist, _, cell = heapq.heappop(queue)
-            if dist > cell.dists[unit_id][0]:
-                continue
-            for new_cell in cell.search_neighbors():
-                new_dist = dist + 1 + 6*new_cell.hp if new_cell.box else dist + 1
-                if new_cell.future_fire_end:
-                    new_dist = max(new_dist, new_cell.future_fire_end - self.board.tick)
+            for new_cell in cell.search_neighbors(player):
+                new_dist = dist + 1
+                if new_cell.box:
+                    new_dist += 6 * new_cell.hp
+
+                arrival_tick = self.board.tick + new_dist
+                if (new_cell.future_fire_end
+                    and new_cell.future_fire_start <= arrival_tick < new_cell.future_fire_end):
+                    new_dist = new_cell.future_fire_end - self.board.tick
+
                 if new_dist < new_cell.dists[unit_id][0]:
                     new_cell.dists[unit_id] = (new_dist, cell)
                     heapq.heappush(queue, (new_dist, random.random(), new_cell))
@@ -120,17 +126,16 @@ class Cell:
         #            s += str(cell.dists[self.id][0]) + '\t'
         #    print(s)
 
-    
     def _update_score(self):
         score = 0
         if self.blast_powerup:
-            score += 1
+            score += 10
         if self.freeze_powerup:
-            score += 2
-        self.score = score
-
-    #def _clear_dists(self):
-    #    self.dists = {unit_id: (UNREACHABLE, None) for unit_id in self.board.units}
+            score += 20
+        self.score = [score] * 4
+        for i in range(len(self.score)):
+            self.score[i] += self.box_range[i]
+        #print(f'{self.x},{self.y}: {score} {self.score} {self.box_range}')
 
     def _init_neighbors(self):
         self.west = self.neighbor(-1, 0)
@@ -176,29 +181,20 @@ class Unit:
     def set_goal_list(self):
         '''Return list of three (cell, score) pairs in order'''
         # Function of cell score and distance
-        # TODO will also need to work in bomb placement/detonation at some point
+        # TODO will also need to work in bomb placement/detonation at some point        
         goal_list = []
-        #foo = False
         for cell in self.board.cells:
-            #if cell.score > 0:
-            #    foo = True
-            #    print(f'Nonzero score! at {cell.x},{cell.y}')
-            # dist=0   -> 100%
-            # dist=10  ->  93%
-            # dist=50  ->  67%
-            # dist=100 ->  33%
+            cell_score_i = min(len(cell.score) - 1, ((self.diameter // 2) - 1))
+            cell_score = cell.score[cell_score_i]
             cell_dist =  cell.dists[self.id][0]
-            goal_score = cell.score * ((50 + max(1, 100 - cell_dist)) / 150)
-            #if foo:
-            #    print('RMA', cell.score, cell_dist, goal_score)
+            #goal_score = cell_score * (max(1, 100 - cell_dist) / 100)
+            goal_score = cell_score * (0.9 ** cell_dist)
             goal_list.append((goal_score, cell))
         goal_list.sort(key=lambda x: x[0], reverse=True)
         self.goal_list = goal_list[:3]
-        #for score, cell in self.goal_list:
-        #    print(f'Unit {self.id} goal: {cell.x},{cell.y} score: {cell.score} -> {score}')
 
     def _update_dists(self):
-        self.cell._update_dists_to_all(self.id)
+        self.cell._update_dists_to_all(self.id, self.player)
 
     def _on_unit_state(self, payload):
         if self.cell and self.cell.unit == self:
@@ -225,7 +221,6 @@ class Unit:
             self.x -= 1
         self.cell = self.board.cells[self.y * SIZE + self.x]
         self.cell.unit = self
-        #print(f'Unit {self.id} now at cell {self.cell.x},{self.cell.y}')
 
 
 class Player:
@@ -263,13 +258,26 @@ class Board:
         return self.cells[y * SIZE + x]
 
     def _update_dists(self):
-        #for cell in self.cells:
-        #    cell._clear_dists()
         for unit in self.units.values():
             unit._update_dists()
-        #for unit_id, dist in self.cells[7 * SIZE + 7].dists.items():
-        #    aid = self.units[unit_id].player.id
-        #    print(f'Unit {unit_id} ({aid}) is {dist} ticks from the center')
+
+    def _update_box_range(self):
+        for cell in self.cells:
+            cell.box_range = [0, 0, 0, 0]
+        for cell in self.cells:
+            if cell.wall or cell.box or cell.bomb:
+                continue
+            for direction in ('north', 'south', 'east', 'west'):
+                nearby_cell = cell
+                for dist in range(4):
+                    nearby_cell = getattr(nearby_cell, direction)
+                    if not nearby_cell or nearby_cell.wall:
+                        break
+                    if nearby_cell.box:
+                        #if nearby_cell.hp == 1: # TODO somehow handle higher hps
+                        for i in range(dist, len(cell.box_range)):
+                            cell.box_range[i] += 1 / (10 ** (nearby_cell.hp - 1))
+                        break
 
     def _on_bomb_placed(self, cell):
         '''Can be called more than once, and on different ticks'''
@@ -278,7 +286,6 @@ class Board:
         def _set_future_fire(cell, count, direction):
             if cell is None or count == 0 or cell.box or cell.wall:
                 return
-            # These will be cleared when the fire entity is expired
             cell.future_fire_start, cell.future_fire_end = start, end
             _set_future_fire(getattr(cell, direction), count - 1, direction)
         for direction in ('north', 'south', 'east', 'west'):
@@ -340,8 +347,7 @@ class GameState:
         data_type = data.get("type")
 
         if data_type == "info":
-            # no operation
-            pass
+            pass # no-op
         elif data_type == "game_state":
             payload = data.get("payload")
             self._on_game_state(payload)
@@ -384,15 +390,20 @@ class GameState:
             else:
                 print(f"unknown event type {event_type}: {event}")
 
-        # Update future fire tick values
+        # Clear future fire tick values
         for cell in self.board.cells:
             cell.future_fire_start = cell.future_fire_end = None
+        # Update future fire tick values
         for cell in self.board.cells:
             if cell.bomb:
                 self.board._on_bomb_placed(cell)
+        # Update cell score values
         for cell in self.board.cells:
             cell._update_score()
+        #raise TypeError('x')
+        # Update unit->cell distances
         self.board._update_dists()
+        self.board._update_box_range()
 
         if self._tick_callback is not None:
             self.board.tick = game_tick.get("tick")
