@@ -20,9 +20,8 @@ class Cell:
         self.y = position // SIZE
         self.west, self.north, self.east, self.south = None, None, None, None
         self.dists = {} # {unit_id: (dist, prev_cell)}
-        self.box_range = [0, 0, 0, 0] # number of boxes within range 1, 2, 3, 4 # TODO: by hp too?
+        self.target_range = [0] * 10 # number of targets within range 1, 2, 3, 4...
         self.unit = None
-        self.score = [0, 0, 0, 0] # indexed by ((unit.blast_diameter // 2) - 1)
         self.hp = 0
         self.wall = False # Only true for indestructible walls
         self.box = False # Only true for destructible wooden/ore blocks
@@ -33,13 +32,13 @@ class Cell:
         self.fire = None # bool
         self.blast_powerup = None
         self.freeze_powerup = None
-        # TODO: future_fire_start/expires['a'] and future_fire_start/expires['b']
-        self.future_fire_start = None # tick that fire may start
-        self.future_fire_end = None # tick that fire may last until
+        self.future_fire_start = {} # tick that fire may start
+        self.future_fire_end = {} # tick that fire may last until
 
     def _on_entity_expired(self):
         if self.bomb_unit:
             self.bomb_unit.bombs.remove(self)
+            self.bomb_unit.player.bombs.remove(self)
         self.hp = 0
         self.wall = False
         self.box = False
@@ -50,8 +49,8 @@ class Cell:
         self.fire = None
         self.blast_powerup = None
         self.freeze_powerup = None
-        self.future_fire_start = None
-        self.future_fire_end = None
+        self.future_fire_start = {}
+        self.future_fire_end = {}
 
     def neighbor(self, dx, dy):
         x, y = self.x + dx, self.y + dy
@@ -74,6 +73,7 @@ class Cell:
                 and not (cell.unit and cell.unit.hp <= 0)] # No dead unit
 
     def get_dist(self, other_cell, player):
+        opp_id = 'a' if player.id == 'b' else 'b'
         temp_id = 'temp'
         for cell in self.board.cells:
             cell.dists[temp_id] = (UNREACHABLE, None)
@@ -87,12 +87,12 @@ class Cell:
             for new_cell in cell.search_neighbors(player):
                 new_dist = dist + 1
                 if new_cell.box:
-                    new_dist += 9 * new_cell.hp
+                    new_dist += 14 * new_cell.hp
 
                 arrival_tick = self.board.tick + new_dist
-                if (new_cell.future_fire_end
-                    and new_cell.future_fire_start <= arrival_tick < new_cell.future_fire_end):
-                    new_dist = new_cell.future_fire_end - self.board.tick
+                if (opp_id in new_cell.future_fire_end
+                    and new_cell.future_fire_start[opp_id] <= arrival_tick + 1 <= new_cell.future_fire_end[opp_id]): #todo +1 is new
+                    new_dist = new_cell.future_fire_end[opp_id] - self.board.tick
 
                 if new_dist < new_cell.dists[temp_id][0]:
                     new_cell.dists[temp_id] = (new_dist, cell)
@@ -105,6 +105,7 @@ class Cell:
         for cell in self.board.cells:
             cell.dists[unit_id] = (UNREACHABLE, None)
 
+        opp_id = 'a' if player.id == 'b' else 'b'
         self.dists[unit_id] = (0, None)
         queue = [(0, 0, self)]
         while queue:
@@ -112,12 +113,12 @@ class Cell:
             for new_cell in cell.search_neighbors(player):
                 new_dist = dist + 1
                 if new_cell.box:
-                    new_dist += 9 * new_cell.hp
+                    new_dist += 14 * new_cell.hp
 
                 arrival_tick = self.board.tick + new_dist
-                if (new_cell.future_fire_end
-                    and new_cell.future_fire_start <= arrival_tick < new_cell.future_fire_end):
-                    new_dist = new_cell.future_fire_end - self.board.tick
+                if (opp_id in new_cell.future_fire_end # todo differentiate friendly future fire
+                    and new_cell.future_fire_start[opp_id] <= arrival_tick < new_cell.future_fire_end[opp_id]):
+                    new_dist = new_cell.future_fire_end[opp_id] - self.board.tick
 
                 if new_dist < new_cell.dists[unit_id][0]:
                     new_cell.dists[unit_id] = (new_dist, cell)
@@ -132,23 +133,23 @@ class Cell:
         #            s += str(cell.dists[self.id][0]) + '\t'
         #    print(s)
 
-    def _update_score(self):
-        score = 0
-        # TODO recalibrate values
-        if self.blast_powerup:
-            score += 10
-        if self.freeze_powerup:
-            score += 20
-        if self.future_fire_start: # TODO own or opp?
-            score -= 5
-        if self.wall or self.box:
-            score -= 5
-
-        self.score = [score] * 4
-        if not self.wall and not self.box and not self.bomb_diameter:
-            for i in range(len(self.score)):
-                self.score[i] += self.box_range[i]
-        #print(f'{self.x},{self.y}: {score} {self.score} {self.box_range}')
+    #def _update_score(self):
+    #    score = 0
+    #    # TODO recalibrate values
+    #    if self.blast_powerup:
+    #        score += 10
+    #    if self.freeze_powerup:
+    #        score += 11
+    #    if self.future_fire_start: # TODO own or opp?
+    #        score -= 5
+    #    if self.wall or self.box:
+    #        score -= 20
+    #    self.score = [score] * len(self.target_range)
+    #    if not self.wall and not self.box and not self.bomb_diameter:
+    #        for i in range(len(self.target_range)):
+    #            adjusted_target_range = self.target_range[i] if 
+    #            self.score[i] += self.target_range[i]
+    #    #print(f'{self.x},{self.y}: {score} {self.score} {self.target_range}')
 
     def _init_neighbors(self):
         self.west = self.neighbor(-1, 0)
@@ -164,9 +165,12 @@ class Cell:
         if etype == 'b':
             self.bomb_diameter = payload['blast_diameter']
             self.bomb_unit = self.board.units[payload['unit_id']]
-            assert not self in self.bomb_unit.bombs # todo remove
+            assert not self in self.bomb_unit.bombs
+            assert not self in self.bomb_unit.player.bombs
             self.bomb_unit.bombs.append(self)
-            assert len(self.bomb_unit.bombs) <= 3 # todo remove
+            self.bomb_unit.player.bombs.append(self)
+            assert len(self.bomb_unit.bombs) <= 3
+            assert len(self.bomb_unit.player.bombs) <= 3
         elif etype == 'x':
             self.fire = True
         elif etype == 'bp':
@@ -177,6 +181,8 @@ class Cell:
             self.wall = True
         elif etype == 'w' or etype == 'o':
             self.box = True
+        if self.fire and self.expires is None: # end-of-game fire
+            self.expires = 2000
 
 
 class Unit:
@@ -197,31 +203,49 @@ class Unit:
     def set_goal_list(self):
         '''Return list of three (cell, score) pairs in order'''
         goal_list = []
+        opp_id = 'a' if self.player.id == 'b' else 'b'
 
-        if self.bombs and self.cell.future_fire_start:
+        for cell in self.board.cells:
+            goal_score = 0
+            target_range_i = min(len(cell.target_range) - 1, ((self.diameter // 2) - 1))
+            target_range = cell.target_range[target_range_i]
+            target_range = target_range if (self.player.id == 'a') else -target_range
+            cell_dist =  cell.dists[self.id][0]
+
             # If bomb placed and in future fire: find safety.
-            for cell in self.board.cells:
-                cell_score_i = min(len(cell.score) - 1, ((self.diameter // 2) - 1))
-                cell_score = cell.score[cell_score_i]
-                cell_dist =  cell.dists[self.id][0]
+            if self.bombs and self.cell.future_fire_start:
                 # TODO better safety measurment using convolution
-                goal_score = 10
-                if cell.wall or cell.box:
-                    goal_score = -20
-                if cell.future_fire_start:
-                    goal_score = -10
+                goal_score = 100
+                if cell.wall or cell.box or cell.bomb_diameter:
+                    goal_score -= 100
+                if self.player.id in cell.future_fire_start:
+                    goal_score -= 10
+                if opp_id in cell.future_fire_start:
+                    goal_score -= 25
                 if cell.unit:
-                    goal_score = -5
+                    if cell.unit.player is self.player:
+                        goal_score -= 3
+                    else:
+                        goal_score -= 5
+                if cell.freeze_powerup:
+                    goal_score += 5
+                if cell.blast_powerup:
+                    goal_score += 3
                 goal_score -= cell_dist
-                goal_list.append((goal_score, cell))
-        else:
-            # Otherwise find something to do.
-            for cell in self.board.cells:
-                cell_score_i = min(len(cell.score) - 1, ((self.diameter // 2) - 1))
-                cell_score = cell.score[cell_score_i]
-                cell_dist =  cell.dists[self.id][0]
+            else:  # Otherwise find something to do.
+                cell_score = 0
+                if cell.blast_powerup:
+                    cell_score += 10
+                if cell.freeze_powerup:
+                    cell_score += 15
+                if opp_id in cell.future_fire_start: # TODO own or opp?
+                    cell_score -= 15
+                if cell.wall or cell.box or cell.bomb_diameter:
+                    cell_score -= 20
+                cell_score += target_range
                 goal_score = cell_score * (0.9 ** cell_dist)
-                goal_list.append((goal_score, cell))
+            goal_list.append((goal_score, cell))
+
         goal_list.sort(key=lambda x: x[0], reverse=True)
         self.goal_list = goal_list[:3]
 
@@ -259,6 +283,7 @@ class Player:
     def __init__(self, id):
         self.id = id
         self.units = []
+        self.bombs = []
 
 
 class Board:
@@ -289,7 +314,7 @@ class Board:
     def cell(self, x, y):
         return self.cells[y * SIZE + x]
 
-    def get_bomb_area(self, cell):
+    def get_bomb_area(self, cell, diameter=None):
         bomb_cells = set()
         blast_cells = set()
         new_bomb_cells = [cell]
@@ -303,7 +328,8 @@ class Board:
             blast_cells.add(bomb_cell)
             for direction in ('north', 'south', 'east', 'west'):
                 nearby_cell = bomb_cell
-                for _ in range(bomb_cell.bomb_diameter // 2):
+                bomb_diameter = diameter if (diameter is not None and bomb_cell is cell) else bomb_cell.bomb_diameter
+                for _ in range(bomb_diameter // 2):
                     nearby_cell = getattr(nearby_cell, direction)
                     if not nearby_cell or nearby_cell.wall or nearby_cell.blast_powerup or nearby_cell.freeze_powerup:
                         break
@@ -318,44 +344,67 @@ class Board:
         for unit in self.units.values():
             unit._update_dists()
 
-    def _update_box_range(self):
+    def _update_target_range(self):
+        '''Positive if it favors player a, negative for player b'''
         for cell in self.cells:
-            cell.box_range = [0, 0, 0, 0]
+            cell.target_range = [0] * len(cell.target_range)
         for cell in self.cells:
             if cell.wall or cell.box:
                 continue
             for direction in ('north', 'south', 'east', 'west'):
                 nearby_cell = cell
-                for dist in range(4):
+                for dist in range(len(cell.target_range)):
                     nearby_cell = getattr(nearby_cell, direction)
                     if not nearby_cell or nearby_cell.wall or nearby_cell.blast_powerup or nearby_cell.freeze_powerup:
                         break
                     if nearby_cell.box:
-                        for i in range(dist, len(cell.box_range)):
-                            cell.box_range[i] += 1 / (10 ** (nearby_cell.hp - 1))
+                        min_dist = { 'a': UNREACHABLE, 'b': UNREACHABLE }
+                        for unit_id, unit in self.units.items():
+                            if nearby_cell.dists[unit_id][0] < min_dist[unit.player.id]:
+                                min_dist[unit.player.id] = nearby_cell.dists[unit_id][0]
+                        multiplier = 0
+                        if min_dist['a'] < min_dist['b']:
+                            multiplier = 1
+                        elif min_dist['a'] > min_dist['b']:
+                            multiplier = -1
+                        for i in range(dist, len(cell.target_range)):
+                            cell.target_range[i] += multiplier / (10 ** (nearby_cell.hp - 1)) # 1, 0.1, 0.01
                         break
+                    if (nearby_cell.unit
+                        and nearby_cell.unit.hp > 0 # not dead
+                        and nearby_cell.unit.stunned >= self.tick + 1 + 5): # still stunned when bomb can go off
+                        multiplier = 1 if (nearby_cell.unit.player.id == 'b') else -1
+                        for i in range(dist, len(cell.target_range)):
+                            cell.target_range[i] += multiplier * 20
 
-    def _on_bomb_placed(self, cell, start=None, end=None):
+    def _on_bomb_placed(self, cell, start=None, end=None, player_id=None, bombs_processed=None):
         '''Can be called more than once, and on different ticks'''
         if start is None and end is None:
             start, end = cell.created + 5, cell.expires + 5
+        if player_id is None:
+            player_id = cell.bomb_unit.player.id
+        if bombs_processed is None:
+            bombs_processed = [cell]
         radius = (cell.bomb_diameter // 2) + 1
 
-        def _set_future_fire(cell, count, direction):
+        def _set_future_fire(cell, count, direction, player_id, bombs_processed):
             if cell is None or count == 0 or cell.box or cell.wall:
                 return
-            if cell.future_fire_start: # Take the conservative start/end if overlapping
-                cell.future_fire_start = min(cell.future_fire_start, start)
-                cell.future_fire_end = max(cell.future_fire_end, end)
+            if player_id in cell.future_fire_start: # Take the conservative start/end if overlapping
+                cell.future_fire_start[player_id] = min(cell.future_fire_start[player_id], start)
+                cell.future_fire_end[player_id] = min(cell.future_fire_end[player_id], end)
             else:
-                cell.future_fire_start, cell.future_fire_end = start, end
-            _set_future_fire(getattr(cell, direction), count - 1, direction)
+                cell.future_fire_start[player_id], cell.future_fire_end[player_id] = start, end
+            _set_future_fire(getattr(cell, direction), count - 1, direction, player_id, bombs_processed)
 
-            if cell.bomb_diameter and cell.created + 5 > start and cell.future_fire_start != start:
-                self._on_bomb_placed(cell, start=start, end=end)
+            #if cell.bomb_diameter and cell.created + 5 > start and cell.future_fire_start != start:
+            #    self._on_bomb_placed(cell, start=start, end=end, player_id=player_id)
+            if cell.bomb_diameter and cell not in bombs_processed:
+                bombs_processed.append(cell)
+                self._on_bomb_placed(cell, start=start, end=end, player_id=player_id, bombs_processed=bombs_processed)
 
         for direction in ('north', 'south', 'east', 'west'):
-            _set_future_fire(cell, radius, direction)
+            _set_future_fire(cell, radius, direction, player_id, bombs_processed)
 
     def _on_entity_spawned(self, payload):
         x, y = payload['x'], payload['y']
@@ -458,24 +507,25 @@ class GameState:
 
         # Clear future fire tick values
         for cell in self.board.cells:
-            cell.future_fire_start = cell.future_fire_end = None
+            cell.future_fire_start = {}
+            cell.future_fire_end = {}
         # Update future fire tick values
         for cell in self.board.cells:
             if cell.bomb_diameter:
                 self.board._on_bomb_placed(cell)
         # Update cell score values
-        for cell in self.board.cells:
-            cell._update_score()
+        #for cell in self.board.cells:
+        #    cell._update_score()
         #raise TypeError('x')
         # Update unit->cell distances
         self.board._update_dists()
-        self.board._update_box_range()
+        self.board._update_target_range() # need dists first
 
         if self._tick_callback is not None:
             self.board.tick = game_tick.get("tick")
             await self._tick_callback(self.board)
 
-        #print(f'Tick {self.board.tick} handled in {round(1000 * (time.time() - tick_start_time))}ms')
+        print(f'Tick {self.board.tick} handled in {round(1000 * (time.time() - tick_start_time))}ms')
 
     def _on_unit_action(self, action_packet):
         '''Update units based on movement. Can ignore bomb/detonate actions (handled elsewhere)'''
