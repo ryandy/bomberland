@@ -55,13 +55,13 @@ class Agent():
                 board_copy = board.copy()
                 board_copy.apply_actions(locked_actions + actions)
                 score, desc = board_copy.get_score(unit.player.id)
-                print(f'unit {unit.id} {actions[0]}, score={score}')
+                #print(f'unit {unit.id} {actions[0]}, score={score}')
                 if score > best_action[1]:
                     best_action = actions[0], score, desc
                 del board_copy
 
             # No move does not need to be calculated, just the prev/init score
-            print(f'unit {unit.id} no move, score={init_score}')
+            #print(f'unit {unit.id} no move, score={init_score}')
             if init_score > best_action[1]:
                 best_action = ('move', unit.id, unit.x, unit.y), init_score, init_desc
 
@@ -70,7 +70,7 @@ class Agent():
                 board_copy = board.copy()
                 board_copy.apply_actions(locked_actions + actions)
                 score, desc = board_copy.get_score(unit.player.id)
-                print(f'unit {unit.id} {actions[0]}, score={score}')
+                #print(f'unit {unit.id} {actions[0]}, score={score}')
                 if score > best_action[1]:
                     best_action = actions[0], score, desc
                 del board_copy
@@ -79,14 +79,14 @@ class Agent():
             board_copy = board.copy()
             board_copy.apply_actions(locked_actions + actions)
             score, desc = board_copy.get_score(unit.player.id)
-            print(f'unit {unit.id} {actions[0]}, score={score}')
+            #print(f'unit {unit.id} {actions[0]}, score={score}')
             if score > best_action[1]:
                 best_action = actions[0], score, desc
             del board_copy
 
-            print(f'BEST unit {unit.id} {best_action[0]}, score={best_action[1]}')
-            for m, d in best_action[2]:
-                print(m, d)
+            #print(f'BEST unit {unit.id} {best_action[0]}, score={best_action[1]}')
+            #for m, d in best_action[2]:
+            #    print(m, d)
 
             init_score, init_desc = best_action[1], best_action[2] # Update for next unit
             locked_actions.append(best_action[0])

@@ -1089,14 +1089,14 @@ class GameState:
             self.board.tick = game_tick.get("tick")
             await self._tick_callback(self.board)
 
-        print(f'Tick {self.board.tick} handled in {round(1000 * (time.time() - tick_start_time))}ms')
-        sa, sb = '', ''
-        for unit_id, unit in self.board.units.items():
-            if unit.player.id == 'a':
-                sa = sa + f'{unit.hp} '
-            else:
-                sb = sb + f'{unit.hp} '
-        print(f'A: {sa}, B: {sb}')
+        #print(f'Tick {self.board.tick} handled in {round(1000 * (time.time() - tick_start_time))}ms')
+        #sa, sb = '', ''
+        #for unit_id, unit in self.board.units.items():
+        #    if unit.player.id == 'a':
+        #        sa = sa + f'{unit.hp} '
+        #    else:
+        #        sb = sb + f'{unit.hp} '
+        #print(f'A: {sa}, B: {sb}')
 
     def _on_unit_action(self, action_packet):
         '''Update units based on movement. Can ignore bomb/detonate actions (handled elsewhere)'''

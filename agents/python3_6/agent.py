@@ -42,22 +42,47 @@ def check_for_flee_danger_goal(board, unit):
 def can_detonate_for_damage(board, unit, bomb_cell, diameter=None): # TODO: coordinate with this tick's moves
     if bomb_cell.created and board.tick < bomb_cell.created + 5:
         return False
-    detonate_score = 0
+
     blast_cells = board.get_bomb_area(bomb_cell, diameter=diameter)
+    units_hit = set()
     for blast_cell in blast_cells:
         if blast_cell.unit and blast_cell.unit.invulnerable < board.tick + 1:
-            ds = 0
-            if blast_cell.unit.hp == 3:
-                ds = 10
-            elif blast_cell.unit.hp == 2:
-                ds = 11
-            elif blast_cell.unit.hp == 1:
-                ds = 20
-            detonate_score += (-ds if (blast_cell.unit.player is unit.player) else ds)
-    return detonate_score > 0
+            units_hit.add(blast_cell.unit)
+        if blast_cell.unit_next and blast_cell.unit_next.invulnerable < board.tick + 1:
+            units_hit.add(blast_cell.unit_next)
+
+    detonate_score = 0
+    for unit_hit in units_hit:
+        ds = 0
+        if unit_hit.hp == 3:
+            ds = 10
+        elif unit_hit.hp == 2:
+            ds = 11
+        elif unit_hit.hp == 1:
+            ds = 20
+        detonate_score += (-ds if (unit_hit.player is unit.player) else ds)
+    return detonate_score > 1
+
+def can_bomb_safely(board, unit):
+    # assume valid bombing opp
+    # get_bomb_area
+    # get safe_paths. 
+    # only safe if a cell in safe_paths exists outside of bomb_area
+    blast_cells = board.get_bomb_area(unit.cell, unit.diameter)
+    for dist in range(1, len(unit.cell.safe_paths)):
+        for cell in unit.cell.safe_paths[dist]:
+            if not cell.future_fire_start and not cell in blast_cells:
+                return True
+    return False
+    
 
 def can_bomb_for_stunned_opp(board, unit):
     if unit.cell.bomb_diameter or len(unit.player.bombs) == 3:
+        return False
+    if (unit.cell.fire and unit.cell.expires > board.tick + 1 # still on fire next turn
+        and unit.invulnerable < board.tick + 3):  # Invulnerable in < 3 turns (explosion + 2 escape moves)
+        return False
+    if not can_bomb_safely(board, unit):
         return False
     opp_id = 'a' if unit.player.id == 'b' else 'b'
     opp_stun_cells = []
@@ -75,6 +100,8 @@ def can_bomb_for_stunned_opp(board, unit):
 
 def can_bomb_for_instant_damage(board, unit):
     if unit.cell.bomb_diameter or len(unit.player.bombs) == 3:
+        return False
+    if not can_bomb_safely(board, unit):
         return False
     if (unit.cell.fire
         and unit.cell.expires > board.tick + 1     # Still on fire next turn
@@ -111,7 +138,7 @@ def check_for_stun_attack_goal(board, unit):
                     return cell
     return None
 
-def check_for_powerup_goal(board, unit):
+def check_for_freeze_powerup_goal(board, unit):
     for cell in board.cells:
         if cell.freeze_powerup and not cell.unit:
             min_unit_id, min_safe_dist = None, UNREACHABLE
@@ -124,6 +151,9 @@ def check_for_powerup_goal(board, unit):
             #    print(f'unit {unit.id} dist={cell.safe_dists[unit.id][0]}')
             if min_unit_id == unit.id:
                 return cell
+    return None
+
+def check_for_blast_powerup_goal(board, unit):
     for cell in board.cells:
         if cell.blast_powerup and not cell.unit:
             min_unit_id, min_safe_dist = None, UNREACHABLE
@@ -174,24 +204,32 @@ def check_for_choke_point_goal(board, unit):
 def can_detonate_for_no_damage(board, unit, bomb_cell): # TODO: coordinate with this tick's moves
     if bomb_cell.created and board.tick < bomb_cell.created + 5:
         return False
-    detonate_score = 0
+
     blast_cells = board.get_bomb_area(bomb_cell)
+    units_hit = set()
     for blast_cell in blast_cells:
         if blast_cell.unit and blast_cell.unit.invulnerable < board.tick + 1:
-            ds = 0
-            if blast_cell.unit.hp == 3:
-                ds = 10
-            elif blast_cell.unit.hp == 2:
-                ds = 11
-            elif blast_cell.unit.hp == 1:
-                ds = 20
-            detonate_score += (-ds if (blast_cell.unit.player is unit.player) else ds)
-    return detonate_score == 0
+            units_hit.add(blast_cell.unit)
+        if blast_cell.unit_next and blast_cell.unit_next.invulnerable < board.tick + 1:
+            units_hit.add(blast_cell.unit_next)
+
+    #detonate_score = 0
+    #for unit_hit in units_hit:
+    #    ds = 0
+    #    if unit_hit.hp == 3:
+    #        ds = 10
+    #    elif unit_hit.hp == 2:
+    #        ds = 11
+    #    elif unit_hit.hp == 1:
+    #        ds = 20
+    #    detonate_score += (-ds if (unit_hit.player is unit.player) else ds)
+    #return detonate_score == 0
+    return len(units_hit) == 0
 
 def check_for_mining_goal(board, unit):
     possible_goals = []
     for cell in board.cells:
-        if cell.bomb_diameter:
+        if cell.bomb_diameter or cell.wall or unit.player.id in cell.future_fire_start:
             continue
         target_range_i = min(len(cell.target_range) - 1, ((unit.diameter // 2) - 1))
         target_range = cell.target_range[target_range_i]
@@ -214,10 +252,16 @@ def check_for_any_safe_goal(board, unit):
 def can_bomb_for_mining(board, unit):
     if unit.cell.bomb_diameter or len(unit.player.bombs) == 3:
         return False
+    if (unit.cell.fire and unit.cell.expires > board.tick + 1 # still on fire next turn
+        and unit.invulnerable < board.tick + 3):  # Invulnerable in < 3 turns (explosion + 2 escape moves)
+        return False
+    if not can_bomb_safely(board, unit):
+        return False
     mining_goal = check_for_mining_goal(board, unit)
     return mining_goal is unit.cell
 
 async def do_move(board, unit, dest_cell):
+    # TODO avoid cells with cell.unit_next populated 
     if unit.cell is dest_cell:
         print('! do_move to same cell')
         return
@@ -255,191 +299,149 @@ async def do_move(board, unit, dest_cell):
         unit.cell.south: 'down',
     }
     action = ACTIONS[move_cell]
+    move_cell.unit_next = unit
     print(f'unit {unit.id} do_move {dest_cell.x},{dest_cell.y} via {move_cell.x},{move_cell.y} ({action})')
     if action:
         await board._client.send_move(action, unit.id)
 
 async def do_bomb(board, unit):
+    # Update future_fire_start for unit's player
+    blast_cells = board.get_bomb_area(unit.cell, unit.diameter)
+    for blast_cell in blast_cells:
+        if not unit.player.id in blast_cell.future_fire_start:
+            blast_cell.future_fire_start[unit.player.id] = board.tick + 1 + 5
+            blast_cell.future_fire_end[unit.player.id] = board.tick + 1 + 30 + 5
+        else:
+            blast_cell.future_fire_start[unit.player.id] = (
+                min(board.tick + 1 + 5, blast_cell.future_fire_start[unit.player.id]))
+            blast_cell.future_fire_end[unit.player.id] = (
+                min(board.tick + 1 + 30 + 5, blast_cell.future_fire_end[unit.player.id]))
+    unit.bombs.append(unit.cell)
+    unit.player.bombs.append(unit.cell)
+    unit.cell.bomb_diameter = unit.diameter
+    unit.cell.bomb_unit = unit
     print(f'unit {unit.id} do_bomb {unit.cell.x},{unit.cell.y}')
     await board._client.send_bomb(unit.id)
 
 async def do_detonate(board, unit, bomb_cell):
+    # TODO get blast_cells and set future_fire for board.player.id
+    blast_cells = board.get_bomb_area(unit.cell, unit.diameter)
+    for blast_cell in blast_cells:
+        if not unit.player.id in blast_cell.future_fire_start:
+            blast_cell.future_fire_start[unit.player.id] = board.tick + 1
+            blast_cell.future_fire_end[unit.player.id] = board.tick + 1 + 5
+        else:
+            blast_cell.future_fire_start[unit.player.id] = (
+                min(board.tick + 1 + 5, blast_cell.future_fire_start[unit.player.id]))
+            blast_cell.future_fire_end[unit.player.id] = (
+                min(board.tick + 1 + 5, blast_cell.future_fire_end[unit.player.id]))
+    unit.bombs.remove(bomb_cell)
+    unit.player.bombs.remove(bomb_cell)
+    bomb_cell.bomb_diameter = None
+    bomb_cell.bomb_unit = None
     print(f'unit {unit.id} do_detonate {bomb_cell.x},{bomb_cell.y}')
     await board._client.send_detonate(bomb_cell.x, bomb_cell.y, unit.id)
 
-async def act(board, unit): # TODORMA
-    flee_danger_goal = check_for_flee_danger_goal(board, unit)
-    if flee_danger_goal:
-        print(f'unit {unit.id} flee danger')
-        return await do_move(board, unit, flee_danger_goal)
-    for bomb_cell in unit.bombs:
-        if can_detonate_for_damage(board, unit, bomb_cell):
-            print(f'unit {unit.id} detonate for damage')
-            return await do_detonate(board, unit, bomb_cell)
-    if can_bomb_for_stunned_opp(board, unit):
-        print(f'unit {unit.id} bomb for stunned opp')
-        return await do_bomb(board, unit)
-    if can_bomb_for_instant_damage(board, unit):
-        print(f'unit {unit.id} bomb for instant damage')
-        return await do_bomb(board, unit)
-    stun_attack_goal = check_for_stun_attack_goal(board, unit)
-    if stun_attack_goal:
-        print(f'unit {unit.id} goal: stun attack {stun_attack_goal.x},{stun_attack_goal.y}')
-        return await do_move(board, unit, stun_attack_goal)
-    powerup_goal = check_for_powerup_goal(board, unit)
-    if powerup_goal:
-        print(f'unit {unit.id} goal: powerup {powerup_goal.x},{powerup_goal.y}')
-        return await do_move(board, unit, powerup_goal)
-    detonation_safety_goal = check_for_detonation_safety_goal(board, unit)
-    if detonation_safety_goal:
-        print(f'unit {unit.id} goal: detonation safety {detonation_safety_goal.x},{detonation_safety_goal.y}')
-        return await do_move(board, unit, detonation_safety_goal)
-    choke_point_goal = check_for_choke_point_goal(board, unit)
-    if choke_point_goal:
-        print(f'unit {unit.id} goal: choke point {choke_point_goal.x},{choke_point_goal.y}')
-        return await do_move(board, unit, choke_point_goal)
-    for bomb_cell in unit.bombs:
-        if can_detonate_for_no_damage(board, unit, bomb_cell):
-            print(f'unit {unit.id} detonate for no damage')
-            return await do_detonate(board, unit, bomb_cell)
-    if can_bomb_for_mining(board, unit):
-        print(f'unit {unit.id} bomb for mining')
-        return await do_bomb(board, unit)
-    mining_goal = check_for_mining_goal(board, unit)
-    if mining_goal:
-        print(f'unit {unit.id} goal: mining {mining_goal.x},{mining_goal.y}')
-        return await do_move(board, unit, mining_goal)
-    any_safe_goal = check_for_any_safe_goal(board, unit)
-    if any_safe_goal:
-        print(f'unit {unit.id} goal: anything safe {any_safe_goal.x},{any_safe_goal.y}')
-        return await do_move(board, unit, any_safe_goal)
-    assert False
+async def act(board, units): # TODORMA
 
+    # TODO goal of move to center if near outside late in game (after 200)
+    for player in board.players.values():
+        player.save_bombs = list(player.bombs)
+    for unit in board.units.values():
+        unit.save_bombs = list(unit.bombs)
+    for cell in board.cells:
+        cell.save_bomb_diameter = cell.bomb_diameter
+        cell.save_bomb_unit = cell.bomb_unit
 
-#################################################################
+    units_done = []
+    for unit in [u for u in units if u not in units_done]:
+        flee_danger_goal = check_for_flee_danger_goal(board, unit)
+        if flee_danger_goal:
+            print(f'unit {unit.id} flee danger')
+            await do_move(board, unit, flee_danger_goal)
+            units_done.append(unit)
+    for unit in [u for u in units if u not in units_done]:
+        for bomb_cell in unit.bombs:
+            if can_detonate_for_damage(board, unit, bomb_cell):
+                print(f'unit {unit.id} detonate for damage')
+                await do_detonate(board, unit, bomb_cell)
+                units_done.append(unit)
+                break # out of bomb loop
+    for unit in [u for u in units if u not in units_done]:
+        if can_bomb_for_stunned_opp(board, unit):
+            print(f'unit {unit.id} bomb for stunned opp')
+            await do_bomb(board, unit)
+            units_done.append(unit)
+    for unit in [u for u in units if u not in units_done]:
+        if can_bomb_for_instant_damage(board, unit):
+            print(f'unit {unit.id} bomb for instant damage')
+            await do_bomb(board, unit)
+            units_done.append(unit)
+    for unit in [u for u in units if u not in units_done]:
+        stun_attack_goal = check_for_stun_attack_goal(board, unit)
+        if stun_attack_goal:
+            print(f'unit {unit.id} goal: stun attack {stun_attack_goal.x},{stun_attack_goal.y}')
+            await do_move(board, unit, stun_attack_goal)
+            units_done.append(unit)
+    for unit in [u for u in units if u not in units_done]:
+        freeze_powerup_goal = check_for_freeze_powerup_goal(board, unit)
+        if freeze_powerup_goal:
+            print(f'unit {unit.id} goal: freeze powerup {freeze_powerup_goal.x},{freeze_powerup_goal.y}')
+            await do_move(board, unit, freeze_powerup_goal)
+            units_done.append(unit)
+    # TODO can_bomb_for_opp_disruption
+    for unit in [u for u in units if u not in units_done]:
+        blast_powerup_goal = check_for_blast_powerup_goal(board, unit)
+        if blast_powerup_goal:
+            print(f'unit {unit.id} goal: blast powerup {blast_powerup_goal.x},{blast_powerup_goal.y}')
+            await do_move(board, unit, blast_powerup_goal)
+            units_done.append(unit)
+    for unit in [u for u in units if u not in units_done]:
+        detonation_safety_goal = check_for_detonation_safety_goal(board, unit)
+        if detonation_safety_goal:
+            print(f'unit {unit.id} goal: detonation safety {detonation_safety_goal.x},{detonation_safety_goal.y}')
+            await do_move(board, unit, detonation_safety_goal)
+            units_done.append(unit)
+    for unit in [u for u in units if u not in units_done]:
+        choke_point_goal = check_for_choke_point_goal(board, unit)
+        if choke_point_goal:
+            print(f'unit {unit.id} goal: choke point {choke_point_goal.x},{choke_point_goal.y}')
+            await do_move(board, unit, choke_point_goal)
+            units_done.append(unit)
+    for unit in [u for u in units if u not in units_done]:
+        for bomb_cell in unit.bombs:
+            assert bomb_cell.bomb_diameter
+            if can_detonate_for_no_damage(board, unit, bomb_cell):
+                print(f'unit {unit.id} detonate for no damage')
+                await do_detonate(board, unit, bomb_cell)
+                units_done.append(unit)
+                break # out of bomb loop
+    for unit in [u for u in units if u not in units_done]:
+        if can_bomb_for_mining(board, unit):
+            print(f'unit {unit.id} bomb for mining')
+            await do_bomb(board, unit)
+            units_done.append(unit)
+    for unit in [u for u in units if u not in units_done]:
+        mining_goal = check_for_mining_goal(board, unit)
+        if mining_goal:
+            print(f'unit {unit.id} goal: mining {mining_goal.x},{mining_goal.y}')
+            await do_move(board, unit, mining_goal)
+            units_done.append(unit)
+    for unit in [u for u in units if u not in units_done]:
+        any_safe_goal = check_for_any_safe_goal(board, unit)
+        if any_safe_goal:
+            print(f'unit {unit.id} goal: anything safe {any_safe_goal.x},{any_safe_goal.y}')
+            await do_move(board, unit, any_safe_goal)
+            units_done.append(units)
+    assert len(units) == len(units_done)
 
-
-
-def assign_goals(board, units):
-    units = list(units)
-    goal_cells = []
-    unit_goal_lists = []
-    for unit in units:
-        unit.set_goal_list()
-    while units:
-        max_score, max_score_cell, max_score_unit = -10000, None, None
-        for unit in units:
-            for score, cell in unit.goal_list:
-                if score > max_score and not cell in goal_cells:
-                    max_score, max_score_cell, max_score_unit = score, cell, unit
-                    break # Best goal possible for this unit, break out to go to next unit list
-        if max_score_unit is None:
-            print(unit.goal_list)
-        print(f'Unit {max_score_unit.id} goal {max_score_cell.x},{max_score_cell.y}: score={max_score}, dist={max_score_cell.dists[unit.id]}')
-        max_score_unit.goal_cell = max_score_cell
-        goal_cells.append(max_score_cell)
-        units.remove(max_score_unit)
-
-
-def get_move_score(board, unit, move_cell):
-    own_id, opp_id = unit.player.id, ('a' if unit.player.id == 'b' else 'b')
-    init_cell = unit.cell
-    init_center_dist = abs(init_cell.x - 7) + abs(init_cell.y - 7)
-    center_dist = abs(move_cell.x - 7) + abs(move_cell.y - 7)
-    init_goal_dist = unit.goal_cell.dists[unit.id][0]
-    goal_dist = init_goal_dist if move_cell is init_cell else move_cell.get_dist(unit.goal_cell, unit.player)
-
-    move_score = 0
-    if move_cell.blast_powerup or move_cell.freeze_powerup:
-        move_score += 100
-    if goal_dist < init_goal_dist:
-        move_score += 10
-    if goal_dist > init_goal_dist:
-        move_score -= 10
-    if center_dist < init_center_dist:
-        move_score += 1
-
-    # TODO: Analyze couple steps of path to determine safety
-    arrival_tick = board.tick + 1
-    if opp_id in move_cell.future_fire_start:
-        print(f'Unit {unit.id} move to {move_cell.x},{move_cell.y}: OPP start/tick+1/end: {move_cell.future_fire_start[opp_id]} <= {board.tick + 2} < {move_cell.future_fire_end[opp_id]}')
-    if own_id in move_cell.future_fire_start:
-        print(f'Unit {unit.id} move to {move_cell.x},{move_cell.y}: OWN start/tick+1/end: {move_cell.future_fire_start[own_id]} <= {board.tick + 2} < {move_cell.future_fire_end[own_id]}')
-
-    if (opp_id in move_cell.future_fire_start
-        # Possible opponent attack
-        # fire_start = 5
-        #   tick = 2, arrive = 3 (Ok, can leave on 4 safely)
-        #   tick = 3, arrive = 4 (Bad, can't leave in time)
-        #   tick = 4, arrive = 5 (Bad, arrive on fire turn)
-        and move_cell.future_fire_start[opp_id] <= arrival_tick + 1):
-        move_score -= 1000
-    if (own_id in move_cell.future_fire_end
-        # Forced friendly fire
-        and move_cell.future_fire_end[own_id] - 5 <= arrival_tick + 1):
-        move_score -= 5000
-    if (move_cell.fire
-        and arrival_tick + 1 < move_cell.expires    # need to survive 2+ ticks at dest (arrive tick and depart tick)
-        and unit.invulnerable < arrival_tick + 1):  # Vulnerable in 2 turns
-        move_score -= 10000
-    if (move_cell.fire
-        # You don't want to step onto a fire square, then realize the fire lasts 1+ turns and your invuln lasts 0 more
-        # You'll get burned before you move off
-        #
-        # If fire lasts 1 more turn,  need 1+ invuln
-        # If fire lasts 2 more turns, need 2+ invuln
-        # If fire lasts 3 more turns, need 2+ invuln
-        and arrival_tick + 1 == move_cell.expires   # only need to survive next tick (arrive tick)
-        and unit.invulnerable < arrival_tick):  # Vulnerable next turn
-        move_score -= 20000
-
-    return move_score
-
-
-def get_bomb_score(board, unit):
-    if len(unit.player.bombs) == 3:
-        return -1
-    if unit.cell.bomb_diameter:
-        return -1
-    if unit.cell is unit.goal_cell: # TODO Should not always do this. Other goals exist.
-        if unit.bombs: # If one bomb has already out from this unit, this second one better be good
-            # different types of cell scores? this is the attack score?
-            target_range_i = min(len(unit.cell.target_range) - 1, ((unit.diameter // 2) - 1))
-            target_range = unit.cell.target_range[target_range_i]
-            target_range = target_range if (unit.player.id == 'a') else -target_range
-            if target_range > 5:
-                return 0.6
-        else:
-            return 0.5
-    if (unit.cell.fire
-        and unit.cell.expires > board.tick + 1     # Still on fire next turn
-        and unit.invulnerable >= board.tick + 3):  # Invulnerable in 3 turns (explosion + 2 escape moves)
-        instant_detonate_score = get_detonate_score(board, unit, unit.cell, diameter=unit.diameter)
-        if instant_detonate_score > 1:
-            print('!!!Instant detonate!!!')
-            return instant_detonate_score
-    return 0
-
-
-def get_detonate_score(board, unit, bomb_cell, diameter=None):
-    if bomb_cell.created and board.tick < bomb_cell.created + 5:
-        return 0
-
-    detonate_score = 0
-    blast_cells = board.get_bomb_area(bomb_cell, diameter=diameter)
-
-    for blast_cell in blast_cells:
-        if blast_cell.unit and blast_cell.unit.invulnerable < board.tick + 1:
-            ds = 0
-            if blast_cell.unit.hp > 1:
-                ds = 10
-            elif blast_cell.unit.hp == 1:
-                ds = 20
-            detonate_score += (-ds if (blast_cell.unit.player is unit.player) else ds)
-            print(f'Blast cell {blast_cell.x},{blast_cell.y}: unit {blast_cell.unit.id}, player {blast_cell.unit.player.id}, current player {unit.player.id}, same? {blast_cell.unit.player is unit.player}, hp {blast_cell.unit.hp}, score {detonate_score}')
-        if blast_cell.box:
-            detonate_score += 1 / (10 ** blast_cell.hp) # 0.1, 0.01, 0.001
-    return detonate_score
+    for player in board.players.values():
+        player.bombs = list(player.save_bombs)
+    for unit in board.units.values():
+        unit.bombs = list(unit.save_bombs)
+    for cell in board.cells:
+        cell.bomb_diameter = cell.save_bomb_diameter
+        cell.bomb_unit = cell.save_bomb_unit
 
 
 class Agent():
@@ -452,10 +454,11 @@ class Agent():
         loop.run_until_complete(asyncio.wait(tasks))
 
     async def _on_game_tick(self, board):
-        for unit in board.player.units:
-            if unit.hp <= 0:
-                continue
-            await act(board, unit)
+        for cell in board.cells:
+            cell.unit_next = None
+
+        units = [u for u in board.player.units if u.hp > 0 and u.stunned < board.tick]
+        await act(board, units)
         return
 
 

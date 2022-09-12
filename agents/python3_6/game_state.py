@@ -36,6 +36,7 @@ class Cell:
         self.freeze_powerup = None
         self.future_fire_start = {} # tick that fire may start
         self.future_fire_end = {} # tick that fire may last until
+        self.eog_fire = False
 
     def _on_entity_expired(self):
         if self.bomb_unit:
@@ -398,6 +399,7 @@ class Cell:
             self.box = True
         if self.fire and self.expires is None: # end-of-game fire
             self.expires = 2000
+            self.eog_fire = True
 
 
 class Unit:
@@ -544,7 +546,7 @@ class Board:
             blast_cells.add(bomb_cell)
             for direction in ('north', 'south', 'east', 'west'):
                 nearby_cell = bomb_cell
-                bomb_diameter = diameter if (diameter is not None and bomb_cell is cell) else bomb_cell.bomb_diameter
+                bomb_diameter = diameter if (not diameter is None and bomb_cell is cell) else bomb_cell.bomb_diameter
                 for _ in range(bomb_diameter // 2):
                     nearby_cell = getattr(nearby_cell, direction)
                     if not nearby_cell or nearby_cell.wall or nearby_cell.blast_powerup or nearby_cell.freeze_powerup:
@@ -736,6 +738,12 @@ class GameState:
         for cell in self.board.cells:
             if cell.bomb_diameter:
                 self.board._on_bomb_placed(cell)
+            #if cell.eog_fire and cell.created >= self.board.tick - 4: TODO RMA EOG FIRE
+            #    if cell.x < cell.y:
+            #        pass
+            #    elif cell.x > cell.y:
+            #        pass
+            #    elif
         # Update unit->cell distances
         self.board._update_dists()
         self.board._update_target_range() # need dists first
