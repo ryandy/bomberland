@@ -53,6 +53,22 @@ services:
         #volumes: # ra
         #    - ./agents/python3_5:/app #ra
 
+    python3_6-agent:
+        build:
+            context: agents/python3_6
+            dockerfile: Dockerfile
+            dockerfile: Dockerfile.dev # ra
+        volumes: # ra
+            - ./agents/python3_6:/app #ra
+
+    python3_7-agent:
+        build:
+            context: agents/python3_7
+            dockerfile: Dockerfile
+            dockerfile: Dockerfile.dev # ra
+        volumes: # ra
+            - ./agents/python3_7:/app #ra
+
 
 
     python3-agent-dev:

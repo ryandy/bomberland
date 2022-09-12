@@ -20,6 +20,8 @@ class Cell:
         self.y = position // SIZE
         self.west, self.north, self.east, self.south = None, None, None, None
         self.dists = {} # {unit_id: (dist, prev_cell)}
+        self.safe_dists = {} # {unit_id: (dist, prev_cell)}
+        self.safe_paths = None
         self.target_range = [0] * 10 # number of targets within range 1, 2, 3, 4...
         self.unit = None
         self.hp = 0
@@ -63,14 +65,199 @@ class Cell:
         return [cell for cell in cells
                 if cell # cell exists
                 and not cell.wall # cell is not impenetrable
+                # TODO opp only impenetrable if same pos and move for 2-3+ turns
                 and not (cell.unit and (cell.unit.hp <= 0 or not cell.unit.player is player))] # No dead/opp unit
 
     def move_neighbors(self):
-        cells = random.sample([self.north, self.east, self.south, self.west], 4)
+        cells = random.sample([self.north, self.east, self.south, self.west, self], 5)
         return [cell for cell in cells
                 if cell # cell exists
                 and not cell.wall and not cell.bomb_diameter and not cell.box  # No blocking entity
                 and not (cell.unit and cell.unit.hp <= 0)] # No dead unit
+
+    def safe_turns(self, player, invulnerable):
+        own_id, opp_id = player.id, ('a' if player.id == 'b' else 'b')
+
+        danger_ranges = []
+        if self.fire:
+            danger_ranges.append((self.created, self.expires))
+        if self.future_fire_start:
+            # fire_start = 5
+            #   tick = 2, arrive = 3 (Ok, can leave on 4 safely)
+            #   tick = 3, arrive = 4 (Bad, can't leave in time)
+            #   tick = 4, arrive = 5 (Bad, arrive on fire turn)
+            # fire_end = 10
+            #   tick = 8, arrive = 9 (Bad)
+            #   tick = 9, arrive = 10 (Ok)
+            #   tick = 10, arrive = 11 (Ok)
+            if opp_id in self.future_fire_start:
+                danger_ranges.append((self.future_fire_start[opp_id], self.future_fire_end[opp_id]))
+            if own_id in self.future_fire_end:
+                danger_ranges.append((self.future_fire_end[own_id] - 5, self.future_fire_end[own_id]))
+
+        min_danger_start = UNREACHABLE
+        for danger_start, safe_begin in danger_ranges:
+            danger_start = max(danger_start, invulnerable + 1)
+            if danger_start <= self.board.tick + 1 < safe_begin:
+                return 0
+            if self.board.tick + 1 < safe_begin and danger_start < min_danger_start:
+                min_danger_start = danger_start
+        return min_danger_start - self.board.tick - 1
+
+    def is_safe(self, player, arrival_tick, invulnerable):
+        '''Returns (bool, int) for is_safe, additional ticks necessary to wait'''
+        own_id, opp_id = player.id, ('a' if player.id == 'b' else 'b')
+
+        # If inaccessible
+        if (self.wall
+            or self.box
+            or self.bomb_diameter
+            or (self.unit and self.unit.hp <= 0) # dead
+            # TODO: instead check for any unit with consistent pos/move
+            or self.unit and not self.unit.player is player): # opp unit
+            return False, 0
+
+        # Determine danger range for current/future fire
+        danger_ranges = []
+        if self.fire:
+            danger_ranges.append((self.created, self.expires))
+        if self.future_fire_start:
+            # fire_start = 5
+            #   tick = 2, arrive = 3 (Ok, can leave on 4 safely)
+            #   tick = 3, arrive = 4 (Bad, can't leave in time)
+            #   tick = 4, arrive = 5 (Bad, arrive on fire turn)
+            # fire_end = 10
+            #   tick = 8, arrive = 9 (Bad)
+            #   tick = 9, arrive = 10 (Ok)
+            #   tick = 10, arrive = 11 (Ok)
+            if opp_id in self.future_fire_start:
+                danger_ranges.append((self.future_fire_start[opp_id], self.future_fire_end[opp_id]))
+            if own_id in self.future_fire_end:
+                danger_ranges.append((self.future_fire_end[own_id] - 5, self.future_fire_end[own_id]))
+
+        safe_wait = 0
+        safe_wait_adjusted = True
+        while safe_wait_adjusted:
+            safe_wait_adjusted = False
+            for danger_start, safe_begin in danger_ranges:
+                # Vulnerable and need to wait 1 turn
+                if (safe_wait + arrival_tick + 1 == safe_begin  # only need to survive 1 tick (arrival tick)
+                    and invulnerable < safe_wait + arrival_tick):  # vulnerable upon arrival (or earlier)
+                    assert safe_begin - arrival_tick > safe_wait  # should only increase
+                    safe_wait = safe_begin - arrival_tick  # Wait until fire expires (1 turn)
+                    safe_wait_adjusted = True
+                    #print(f'(A) Safe wait {safe_wait} ticks before ({self.x},{self.y}): arrival={arrival_tick}, range={danger_start}..{safe_begin}')
+                    break
+
+                # Vulnerable and need to wait 2+ turns
+                if (danger_start <= safe_wait + arrival_tick + 1 < safe_begin  # Need 2+ ticks at dest (arrive tick and depart tick)
+                    and invulnerable < safe_wait + arrival_tick + 1):  # Vulnerable the turn after arrival (or earlier)
+                    assert safe_begin - arrival_tick > safe_wait
+                    safe_wait = safe_begin - arrival_tick  # Wait until fire expires
+                    safe_wait_adjusted = True
+                    #print(f'(B) Safe wait {safe_wait} ticks before ({self.x},{self.y}): arrival={arrival_tick}, range={danger_start}..{safe_begin}')
+                    break
+
+        # Safe given a certain waiting period (can be 0)
+        return True, safe_wait
+
+    def get_safe_paths(self, player, invulnerable, ok_cells=None, bad_cells=None):
+        '''Returns list of safe dest lists for 1-6tick (longer than invuln and bomb priming) cells'''
+        temp_id = 'temp'
+        for cell in self.board.cells:
+            cell.safe_dists[temp_id] = (UNREACHABLE, None)
+
+        safe_at_dist = [[] for _ in range(6+1)]
+        self.safe_dists[temp_id] = (0, None)
+        queue = [(0, 0, self)]
+        while queue:
+            dist, _, cell = heapq.heappop(queue)
+            if dist >= len(safe_at_dist):
+                continue
+
+            safe, safe_wait = True, 0
+            if dist > 0:  # Intrinsically "safe" initially in the sense that we can't change the present
+                safe, safe_wait = cell.is_safe(player, self.board.tick + dist, invulnerable)
+            if not safe:
+                continue
+
+            if dist + safe_wait >= len(safe_at_dist):
+                continue
+
+            wait_is_ok = True
+            for i in range(safe_wait):
+                # Confirm that this new timing can work with the preceding cell in the path
+                # We know that prev_cell is ok at tick + dist - 1
+                #               and cell is ok at tick + dist + safe_wait
+                # Need to confirm tick + dist through tick + dist + safe_wait - 1
+                prev_cell = cell.safe_dists[temp_id][1]
+                prev_safe, prev_safe_wait = prev_cell.is_safe(player, self.board.tick + dist + i, invulnerable)
+                if (not prev_safe and not prev_cell is self) or prev_safe_wait != 0:
+                    wait_is_ok = False
+                    break
+            if not wait_is_ok:
+                continue
+
+            safe_at_dist[dist + safe_wait].append(cell)
+
+            for new_cell in cell.search_neighbors(player):                          
+                new_dist = dist + safe_wait + 1
+                if new_dist < new_cell.safe_dists[temp_id][0]:
+                    new_cell.safe_dists[temp_id] = (new_dist, cell)
+                    heapq.heappush(queue, (new_dist, random.random(), new_cell))
+
+        safe_paths = safe_at_dist
+        print(f'unit {self.unit.id} safe paths:  ({invulnerable} {self.unit.invulnerable} {self.unit.stunned})')
+        for i in range(len(safe_paths)):
+            s = f'{i} ({len(safe_paths[i])}): '
+            safe_paths[i].sort(key = lambda x: 100 * x.y + x.x)
+            for c in safe_paths[i]:
+                s = s + f'({c.x},{c.y}), '
+            print(s)
+                    
+        return safe_at_dist
+
+    def get_safe_dist(self, other_cell, player, invulnerable, stunned):
+        opp_id = 'a' if player.id == 'b' else 'b'
+        temp_id = 'temp'
+        for cell in self.board.cells:
+            cell.safe_dists[temp_id] = (UNREACHABLE, None)
+
+        init_dist = max(0, stunned - self.board.tick)
+        self.safe_dists[temp_id] = (0, None)
+        queue = [(init_dist, 0, self)]
+        while queue:
+            dist, _, cell = heapq.heappop(queue)
+
+            safe, safe_wait = True, 0
+            if dist > init_dist:  # Intrinsically "safe" initially in the sense that we can't change the present
+                safe, safe_wait = cell.is_safe(player, self.board.tick + dist, invulnerable)
+            if not safe:
+                continue
+
+            wait_is_ok = True
+            for i in range(safe_wait):
+                # Confirm that this new timing can work with the preceding cell in the path
+                # We know that prev_cell is ok at tick + dist - 1
+                #               and cell is ok at tick + dist + safe_wait
+                # Need to confirm tick + dist through tick + dist + safe_wait - 1
+                prev_cell = cell.safe_dists[temp_id][1]
+                prev_safe, prev_safe_wait = prev_cell.is_safe(player, self.board.tick + dist + i, invulnerable)
+                if (not prev_safe and not prev_cell is self) or prev_safe_wait != 0:
+                    wait_is_ok = False
+                    break
+            if not wait_is_ok:
+                continue
+
+            if cell is other_cell:
+                return dist # todo also include initial move cell?
+
+            for new_cell in cell.search_neighbors(player):
+                new_dist = dist + safe_wait + 1
+                if new_dist < new_cell.safe_dists[temp_id][0]:
+                    new_cell.safe_dists[temp_id] = (new_dist, cell)
+                    heapq.heappush(queue, (new_dist, random.random(), new_cell))
+        return UNREACHABLE
 
     def get_dist(self, other_cell, player):
         opp_id = 'a' if player.id == 'b' else 'b'
@@ -91,7 +278,7 @@ class Cell:
 
                 arrival_tick = self.board.tick + new_dist
                 if (opp_id in new_cell.future_fire_end
-                    and new_cell.future_fire_start[opp_id] <= arrival_tick + 1 <= new_cell.future_fire_end[opp_id]): #todo +1 is new
+                    and new_cell.future_fire_start[opp_id] <= arrival_tick + 1 <= new_cell.future_fire_end[opp_id]):
                     new_dist = new_cell.future_fire_end[opp_id] - self.board.tick
 
                 if new_dist < new_cell.dists[temp_id][0]:
@@ -99,6 +286,52 @@ class Cell:
                     heapq.heappush(queue, (new_dist, random.random(), new_cell))
         return UNREACHABLE
 
+    def _update_safe_paths(self, unit_id, player):
+        assert self.unit and self.unit.id == unit_id
+        self.safe_paths = self.get_safe_paths(player, self.unit.invulnerable)
+
+    def _update_safe_dists_to_all(self, unit_id, player):
+        assert self.unit and self.unit.id == unit_id
+
+        for cell in self.board.cells:
+            cell.safe_dists[unit_id] = (UNREACHABLE, None)
+
+        if self.unit.hp <= 0:
+            return
+
+        init_dist = max(0, self.unit.stunned - self.board.tick)
+        opp_id = 'a' if player.id == 'b' else 'b'
+        self.safe_dists[unit_id] = (0, None)
+        queue = [(init_dist, 0, self)]
+        while queue:
+            dist, _, cell = heapq.heappop(queue)
+
+            safe, safe_wait = True, 0
+            if dist > init_dist:  # Intrinsically "safe" initially in the sense that we can't change the present
+                safe, safe_wait = cell.is_safe(player, self.board.tick + dist, self.unit.invulnerable)
+            if not safe:
+                continue
+
+            wait_is_ok = True
+            for i in range(safe_wait):
+                # Confirm that this new timing can work with the preceding cell in the path
+                # We know that prev_cell is ok at tick + dist - 1
+                #               and cell is ok at tick + dist + safe_wait
+                # Need to confirm tick + dist through tick + dist + safe_wait - 1
+                prev_cell = cell.safe_dists[unit_id][1]
+                prev_safe, prev_safe_wait = prev_cell.is_safe(player, self.board.tick + dist + i, self.unit.invulnerable)
+                if (not prev_safe and not prev_cell is self) or prev_safe_wait != 0:
+                    wait_is_ok = False
+                    break
+            if not wait_is_ok:
+                continue
+
+            for new_cell in cell.search_neighbors(player):
+                new_dist = dist + safe_wait + 1
+                if new_dist < new_cell.safe_dists[unit_id][0]:
+                    new_cell.safe_dists[unit_id] = (new_dist, cell)
+                    heapq.heappush(queue, (new_dist, random.random(), new_cell))
+    
     def _update_dists_to_all(self, unit_id, player):
         assert self.unit and self.unit.id == unit_id
 
@@ -116,7 +349,7 @@ class Cell:
                     new_dist += 14 * new_cell.hp
 
                 arrival_tick = self.board.tick + new_dist
-                if (opp_id in new_cell.future_fire_end # todo differentiate friendly future fire
+                if (opp_id in new_cell.future_fire_end
                     and new_cell.future_fire_start[opp_id] <= arrival_tick < new_cell.future_fire_end[opp_id]):
                     new_dist = new_cell.future_fire_end[opp_id] - self.board.tick
 
@@ -132,24 +365,6 @@ class Cell:
         #        else:
         #            s += str(cell.dists[self.id][0]) + '\t'
         #    print(s)
-
-    #def _update_score(self):
-    #    score = 0
-    #    # TODO recalibrate values
-    #    if self.blast_powerup:
-    #        score += 10
-    #    if self.freeze_powerup:
-    #        score += 11
-    #    if self.future_fire_start: # TODO own or opp?
-    #        score -= 5
-    #    if self.wall or self.box:
-    #        score -= 20
-    #    self.score = [score] * len(self.target_range)
-    #    if not self.wall and not self.box and not self.bomb_diameter:
-    #        for i in range(len(self.target_range)):
-    #            adjusted_target_range = self.target_range[i] if 
-    #            self.score[i] += self.target_range[i]
-    #    #print(f'{self.x},{self.y}: {score} {self.score} {self.target_range}')
 
     def _init_neighbors(self):
         self.west = self.neighbor(-1, 0)
@@ -251,6 +466,8 @@ class Unit:
 
     def _update_dists(self):
         self.cell._update_dists_to_all(self.id, self.player)
+        self.cell._update_safe_dists_to_all(self.id, self.player)
+        self.cell._update_safe_paths(self.id, self.player)
 
     def _on_unit_state(self, payload):
         if self.cell and self.cell.unit == self:
@@ -258,7 +475,7 @@ class Unit:
         self.x, self.y = payload['coordinates']
         self.cell = self.board.cells[self.y * SIZE + self.x]
         self.cell.unit = self
-        self.player = self.board.player_a if payload['agent_id'] == 'a' else self.board.player_b
+        self.player = self.board.players['a'] if payload['agent_id'] == 'a' else self.board.players['b']
         self.hp = payload['hp']
         self.diameter = payload['blast_diameter']
         self.invulnerable = payload['invulnerable']
@@ -291,16 +508,15 @@ class Board:
         self.tick = 0
 
         self.cells = [Cell(self, i) for i in range(SIZE2)]
-        self.player_a = Player('a')
-        self.player_b = Player('b')
-
+        self.players = {player_id: Player(player_id) for player_id in ['a','b']}
         self.units = {unit_id: Unit(self, unit_id) for unit_id in ['c','d','e','f','g','h']}
+
         for unit_id in game_state['unit_state']:
             self.units[unit_id]._on_unit_state(game_state['unit_state'][unit_id])
         for unit_id in game_state['agents']['a']['unit_ids']:
-            self.player_a.units.append(self.units[unit_id])
+            self.players['a'].units.append(self.units[unit_id])
         for unit_id in game_state['agents']['b']['unit_ids']:
-            self.player_b.units.append(self.units[unit_id])
+            self.players['b'].units.append(self.units[unit_id])
 
         for cell in self.cells:
             cell._init_neighbors()
@@ -308,8 +524,8 @@ class Board:
             self._on_entity_spawned(entity)
 
         agent_id = game_state['connection']['agent_id']
-        self.player = self.player_a if agent_id == 'a' else self.player_b
-        self.opp = self.player_a if agent_id == 'b' else self.player_b
+        self.player = self.players['a'] if agent_id == 'a' else self.players['b']
+        self.opp = self.players['a'] if agent_id == 'b' else self.players['b']
 
     def cell(self, x, y):
         return self.cells[y * SIZE + x]
@@ -341,6 +557,8 @@ class Board:
         return list(blast_cells)
 
     def _update_dists(self):
+        for cell in self.cells:
+            cell.safe_paths = None
         for unit in self.units.values():
             unit._update_dists()
 
@@ -360,8 +578,8 @@ class Board:
                     if nearby_cell.box:
                         min_dist = { 'a': UNREACHABLE, 'b': UNREACHABLE }
                         for unit_id, unit in self.units.items():
-                            if nearby_cell.dists[unit_id][0] < min_dist[unit.player.id]:
-                                min_dist[unit.player.id] = nearby_cell.dists[unit_id][0]
+                            if nearby_cell.safe_dists[unit_id][0] < min_dist[unit.player.id]: # todo safe dist to boxes?
+                                min_dist[unit.player.id] = nearby_cell.safe_dists[unit_id][0]
                         multiplier = 0
                         if min_dist['a'] < min_dist['b']:
                             multiplier = 1
@@ -376,6 +594,12 @@ class Board:
                         multiplier = 1 if (nearby_cell.unit.player.id == 'b') else -1
                         for i in range(dist, len(cell.target_range)):
                             cell.target_range[i] += multiplier * 20
+        #print(f'Target range values:')
+        #for y in range(SIZE - 1, -1, -1):
+        #    s = ''
+        #    for cell in self.cells[(y * SIZE):(y * SIZE + SIZE)]:
+        #        s += str((cell.target_range[0], cell.target_range[1])) + '\t'
+        #    print(s)
 
     def _on_bomb_placed(self, cell, start=None, end=None, player_id=None, bombs_processed=None):
         '''Can be called more than once, and on different ticks'''
@@ -397,8 +621,6 @@ class Board:
                 cell.future_fire_start[player_id], cell.future_fire_end[player_id] = start, end
             _set_future_fire(getattr(cell, direction), count - 1, direction, player_id, bombs_processed)
 
-            #if cell.bomb_diameter and cell.created + 5 > start and cell.future_fire_start != start:
-            #    self._on_bomb_placed(cell, start=start, end=end, player_id=player_id)
             if cell.bomb_diameter and cell not in bombs_processed:
                 bombs_processed.append(cell)
                 self._on_bomb_placed(cell, start=start, end=end, player_id=player_id, bombs_processed=bombs_processed)
@@ -479,6 +701,7 @@ class GameState:
     def _on_game_state(self, game_state):
         '''Recevie initial game state'''
         self.board = Board(game_state)
+        self.board._client = self
 
     async def _on_game_tick(self, game_tick):
         tick_start_time = time.time()
@@ -513,10 +736,6 @@ class GameState:
         for cell in self.board.cells:
             if cell.bomb_diameter:
                 self.board._on_bomb_placed(cell)
-        # Update cell score values
-        #for cell in self.board.cells:
-        #    cell._update_score()
-        #raise TypeError('x')
         # Update unit->cell distances
         self.board._update_dists()
         self.board._update_target_range() # need dists first
@@ -525,7 +744,14 @@ class GameState:
             self.board.tick = game_tick.get("tick")
             await self._tick_callback(self.board)
 
-        #print(f'Tick {self.board.tick} handled in {round(1000 * (time.time() - tick_start_time))}ms')
+        print(f'Tick {self.board.tick} handled in {round(1000 * (time.time() - tick_start_time))}ms')
+        sa, sb = '', ''
+        for unit_id, unit in self.board.units.items():
+            if unit.player.id == 'a':
+                sa = sa + f'{unit.hp} '
+            else:
+                sb = sb + f'{unit.hp} '
+        print(f'A: {sa}, B: {sb}')
 
     def _on_unit_action(self, action_packet):
         '''Update units based on movement. Can ignore bomb/detonate actions (handled elsewhere)'''

@@ -44,9 +44,9 @@ def assign_goals(board, units):
                 if score > max_score and not cell in goal_cells:
                     max_score, max_score_cell, max_score_unit = score, cell, unit
                     break # Best goal possible for this unit, break out to go to next unit list
-        if max_score_unit is None:
-            print(unit.goal_list)
-        print(f'Unit {max_score_unit.id} goal {max_score_cell.x},{max_score_cell.y}: score={max_score}, dist={max_score_cell.dists[unit.id]}')
+        #if max_score_unit is None:
+        #    print(unit.goal_list)
+        #print(f'Unit {max_score_unit.id} goal {max_score_cell.x},{max_score_cell.y}: score={max_score}, dist={max_score_cell.dists[unit.id]}')
         max_score_unit.goal_cell = max_score_cell
         goal_cells.append(max_score_cell)
         units.remove(max_score_unit)
@@ -73,10 +73,10 @@ def get_move_score(board, unit, move_cell):
     # It is currently 2
     # Tick+1 is 3
     # Fire can start at 4
-    if opp_id in move_cell.future_fire_start:
-        print(f'Unit {unit.id} move to {move_cell.x},{move_cell.y}: OPP start/tick+1/end: {move_cell.future_fire_start[opp_id]} <= {board.tick + 2} < {move_cell.future_fire_end[opp_id]}')
-    if unit.player.id in move_cell.future_fire_start:
-        print(f'Unit {unit.id} move to {move_cell.x},{move_cell.y}: OWN start/tick+1/end: {move_cell.future_fire_start[unit.player.id]} <= {board.tick + 2} < {move_cell.future_fire_end[unit.player.id]}')
+    #if opp_id in move_cell.future_fire_start:
+    #    print(f'Unit {unit.id} move to {move_cell.x},{move_cell.y}: OPP start/tick+1/end: {move_cell.future_fire_start[opp_id]} <= {board.tick + 2} < {move_cell.future_fire_end[opp_id]}')
+    #if unit.player.id in move_cell.future_fire_start:
+    #    print(f'Unit {unit.id} move to {move_cell.x},{move_cell.y}: OWN start/tick+1/end: {move_cell.future_fire_start[unit.player.id]} <= {board.tick + 2} < {move_cell.future_fire_end[unit.player.id]}')
 
     if (opp_id in move_cell.future_fire_start
         and (move_cell.future_fire_start[opp_id] <= board.tick + 2 < move_cell.future_fire_end[opp_id])):
@@ -116,7 +116,7 @@ def get_bomb_score(board, unit):
         and unit.invulnerable >= board.tick + 3):  # Invulnerable in 3 turns (explosion + 2 escape moves)
         instant_detonate_score = get_detonate_score(board, unit, unit.cell, diameter=unit.diameter)
         if instant_detonate_score > 1:
-            print('!!!Instant detonate!!!')
+            #print('!!!Instant detonate!!!')
             return instant_detonate_score
     return 0
 
@@ -129,12 +129,12 @@ def get_detonate_score(board, unit, bomb_cell, diameter=None):
     detonate_score = 0
     blast_cells = board.get_bomb_area(bomb_cell, diameter=diameter)
 
-    print(f'Blast from unit {unit.id} bomb at ({bomb_cell.x},{bomb_cell.y})')
-    blast_cells.sort(key=lambda x: 100 * x.y + x.x)
-    s = ''
-    for c in blast_cells:
-        s = s + f'({c.x},{c.y}), '
-    print(s)
+    #print(f'Blast from unit {unit.id} bomb at ({bomb_cell.x},{bomb_cell.y})')
+    #blast_cells.sort(key=lambda x: 100 * x.y + x.x)
+    #s = ''
+    #for c in blast_cells:
+    #    s = s + f'({c.x},{c.y}), '
+    #print(s)
     
     for blast_cell in blast_cells:
         if blast_cell.unit and blast_cell.unit.invulnerable < board.tick + 1:
@@ -144,7 +144,7 @@ def get_detonate_score(board, unit, bomb_cell, diameter=None):
             elif blast_cell.unit.hp == 1:
                 ds = 20
             detonate_score += (-ds if (blast_cell.unit.player is unit.player) else ds)
-            print(f'Blast cell {blast_cell.x},{blast_cell.y}: unit {blast_cell.unit.id}, player {blast_cell.unit.player.id}, current player {unit.player.id}, same? {blast_cell.unit.player is unit.player}, hp {blast_cell.unit.hp}, score {detonate_score}')
+            #print(f'Blast cell {blast_cell.x},{blast_cell.y}: unit {blast_cell.unit.id}, player {blast_cell.unit.player.id}, current player {unit.player.id}, same? {blast_cell.unit.player is unit.player}, hp {blast_cell.unit.hp}, score {detonate_score}')
         if blast_cell.box:
             detonate_score += 1 / (10 ** blast_cell.hp) # 0.1, 0.01, 0.001
     return detonate_score
@@ -197,17 +197,17 @@ class Agent():
                 unit.cell.south: 'down',
             }
 
-            for i, (move_cell, move_score) in enumerate(move_scores):
-                prefix = '!' if i == 0 else ''
-                print(f'{prefix}Unit {unit.id} move {ACTIONS[move_cell]}: score={move_score}')
+            #for i, (move_cell, move_score) in enumerate(move_scores):
+            #    prefix = '!' if i == 0 else ''
+            #    print(f'{prefix}Unit {unit.id} move {ACTIONS[move_cell]}: score={move_score}')
 
-            if bomb_score > 0:
-                postfix = ' ... but bomb limit' if (len(unit.player.bombs) + bombs_this_tick) >= 3 else ''
-                print(f'Unit {unit.id} bomb score={bomb_score}{postfix}')
+            #if bomb_score > 0:
+            #    postfix = ' ... but bomb limit' if (len(unit.player.bombs) + bombs_this_tick) >= 3 else ''
+            #    print(f'Unit {unit.id} bomb score={bomb_score}{postfix}')
 
-            if best_detonate_score > 0:
-                c = best_detonate_cell
-                print(f'Unit {unit.id} detonate score={best_detonate_score} at {c.x},{c.y}')
+            #if best_detonate_score > 0:
+            #    c = best_detonate_cell
+            #    print(f'Unit {unit.id} detonate score={best_detonate_score} at {c.x},{c.y}')
 
             if best_detonate_score > 0:
                 c = best_detonate_cell
