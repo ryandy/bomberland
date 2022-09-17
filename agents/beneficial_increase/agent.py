@@ -396,7 +396,7 @@ def can_bomb_for_mining(board, unit):
 async def do_move(board, unit, dest_cell):
     # TODO avoid cells with cell.unit_next populated 
     if unit.cell is dest_cell:
-        print('! do_move to same cell')
+        #print('! do_move to same cell')
         return
 
     cell = dest_cell
@@ -407,12 +407,12 @@ async def do_move(board, unit, dest_cell):
         cell = prev_cell
 
     if not cell:
-        print(f'WARNING!!! bad goal for unit {unit.id}')
+        #print(f'WARNING!!! bad goal for unit {unit.id}')
         move_cell = unit.cell
     else:
         move_cell = unit.cell
         safe_turns = cell.safe_turns(unit.player, unit.invulnerable)
-        print(f'SAFE_TURNS: {safe_turns} safe turns(s) at {cell.x},{cell.y}')
+        #print(f'SAFE_TURNS: {safe_turns} safe turns(s) at {cell.x},{cell.y}')
         if safe_turns >= 2:
             move_cell = cell
     
@@ -433,7 +433,7 @@ async def do_move(board, unit, dest_cell):
     }
     action = ACTIONS[move_cell]
     move_cell.unit_next = unit
-    print(f'unit {unit.id} do_move tick{board.tick} {dest_cell.x},{dest_cell.y} via {move_cell.x},{move_cell.y} ({action})')
+    #print(f'unit {unit.id} do_move tick{board.tick} {dest_cell.x},{dest_cell.y} via {move_cell.x},{move_cell.y} ({action})')
     if action:
         await board._client.send_move(action, unit.id)
         #asyncio.ensure_future(board._client.send_move(action, unit.id))
@@ -460,7 +460,7 @@ async def do_bomb(board, unit):
     unit.player.bombs.append(unit.cell)
     unit.cell.bomb_diameter = unit.diameter
     unit.cell.bomb_unit = unit
-    print(f'unit {unit.id} do_bomb tick{board.tick} {unit.cell.x},{unit.cell.y}')
+    #print(f'unit {unit.id} do_bomb tick{board.tick} {unit.cell.x},{unit.cell.y}')
     await board._client.send_bomb(unit.id)
     #asyncio.ensure_future(board._client.send_bomb(unit.id))
     #if (board.tick < 200 and 1000 * (time.time() - board.tick_start) < 60):
@@ -486,7 +486,7 @@ async def do_detonate(board, unit, bomb_cell):
     unit.player.bombs.remove(bomb_cell)
     bomb_cell.bomb_diameter = None
     bomb_cell.bomb_unit = None
-    print(f'unit {unit.id} do_detonate tick{board.tick} {bomb_cell.x},{bomb_cell.y}')
+    #print(f'unit {unit.id} do_detonate tick{board.tick} {bomb_cell.x},{bomb_cell.y}')
     await board._client.send_detonate(bomb_cell.x, bomb_cell.y, unit.id)
     #asyncio.ensure_future(board._client.send_detonate(bomb_cell.x, bomb_cell.y, unit.id))
     #if (board.tick < 200 and 1000 * (time.time() - board.tick_start) < 60):
@@ -514,7 +514,7 @@ async def act(board, units): # TODORMA
     for unit in [u for u in units if u not in units_done]:
         flee_danger_goal = check_for_flee_danger_goal(board, unit)
         if flee_danger_goal:
-            print(f'unit {unit.id} flee danger')
+            #print(f'unit {unit.id} flee danger')
             await do_move(board, unit, flee_danger_goal)
             units_done.append(unit)
 
@@ -522,7 +522,7 @@ async def act(board, units): # TODORMA
     for unit in [u for u in units if u not in units_done]:
         for bomb_cell in unit.bombs:
             if can_detonate_for_damage(board, unit, bomb_cell):
-                print(f'unit {unit.id} detonate for damage')
+                #print(f'unit {unit.id} detonate for damage')
                 await do_detonate(board, unit, bomb_cell)
                 units_done.append(unit)
                 break # out of bomb loop
@@ -539,14 +539,14 @@ async def act(board, units): # TODORMA
     #print('D', len(units_done), round((time.time() - start_time) * 1000))
     for unit in [u for u in units if u not in units_done]:
         if can_bomb_for_stunned_opp(board, unit):
-            print(f'unit {unit.id} bomb for stunned opp')
+            #print(f'unit {unit.id} bomb for stunned opp')
             await do_bomb(board, unit)
             units_done.append(unit)
 
     #print('E', len(units_done), round((time.time() - start_time) * 1000))
     for unit in [u for u in units if u not in units_done]:
         if can_bomb_for_instant_damage(board, unit):
-            print(f'unit {unit.id} bomb for instant damage')
+            #print(f'unit {unit.id} bomb for instant damage')
             await do_bomb(board, unit)
             units_done.append(unit)
 
@@ -554,7 +554,7 @@ async def act(board, units): # TODORMA
     for unit in [u for u in units if u not in units_done]:
         stun_attack_goal = check_for_stun_attack_goal(board, unit)
         if stun_attack_goal:
-            print(f'unit {unit.id} goal: stun attack {stun_attack_goal.x},{stun_attack_goal.y}')
+            #print(f'unit {unit.id} goal: stun attack {stun_attack_goal.x},{stun_attack_goal.y}')
             await do_move(board, unit, stun_attack_goal)
             units_done.append(unit)
 
@@ -562,7 +562,7 @@ async def act(board, units): # TODORMA
     for unit in [u for u in units if u not in units_done]:
         freeze_powerup_goal = check_for_freeze_powerup_goal(board, unit)
         if freeze_powerup_goal:
-            print(f'unit {unit.id} goal: freeze powerup {freeze_powerup_goal.x},{freeze_powerup_goal.y}')
+            #print(f'unit {unit.id} goal: freeze powerup {freeze_powerup_goal.x},{freeze_powerup_goal.y}')
             await do_move(board, unit, freeze_powerup_goal)
             units_done.append(unit)
 
@@ -570,7 +570,7 @@ async def act(board, units): # TODORMA
     for unit in [u for u in units if u not in units_done]:
         blast_powerup_goal = check_for_blast_powerup_goal(board, unit)
         if blast_powerup_goal:
-            print(f'unit {unit.id} goal: blast powerup {blast_powerup_goal.x},{blast_powerup_goal.y}')
+            #print(f'unit {unit.id} goal: blast powerup {blast_powerup_goal.x},{blast_powerup_goal.y}')
             await do_move(board, unit, blast_powerup_goal)
             units_done.append(unit)
 
@@ -578,7 +578,7 @@ async def act(board, units): # TODORMA
     for unit in [u for u in units if u not in units_done]:
         detonation_safety_goal = check_for_detonation_safety_goal(board, unit)
         if detonation_safety_goal:
-            print(f'unit {unit.id} goal: detonation safety {detonation_safety_goal.x},{detonation_safety_goal.y}')
+            #print(f'unit {unit.id} goal: detonation safety {detonation_safety_goal.x},{detonation_safety_goal.y}')
             await do_move(board, unit, detonation_safety_goal)
             units_done.append(unit)
 
@@ -589,14 +589,14 @@ async def act(board, units): # TODORMA
     for unit in [u for u in units if u not in units_done]:
         choke_point_goal = check_for_choke_point_goal(board, unit)
         if choke_point_goal:
-            print(f'unit {unit.id} goal: choke point {choke_point_goal.x},{choke_point_goal.y}')
+            #print(f'unit {unit.id} goal: choke point {choke_point_goal.x},{choke_point_goal.y}')
             await do_move(board, unit, choke_point_goal)
             units_done.append(unit)
 
     #print('K', len(units_done), round((time.time() - start_time) * 1000))
     for unit in [u for u in units if u not in units_done]:
         if can_bomb_for_opp_disruption(board, unit):
-            print(f'unit {unit.id} bomb for opp disruption')
+            #print(f'unit {unit.id} bomb for opp disruption')
             await do_bomb(board, unit)
             units_done.append(unit)
 
@@ -605,7 +605,7 @@ async def act(board, units): # TODORMA
         for bomb_cell in unit.bombs:
             assert bomb_cell.bomb_diameter
             if can_detonate_for_no_damage(board, unit, bomb_cell):
-                print(f'unit {unit.id} detonate for no damage')
+                #print(f'unit {unit.id} detonate for no damage')
                 await do_detonate(board, unit, bomb_cell)
                 units_done.append(unit)
                 break # out of bomb loop
@@ -613,7 +613,7 @@ async def act(board, units): # TODORMA
     #print('M', len(units_done), round((time.time() - start_time) * 1000))
     for unit in [u for u in units if u not in units_done]:
         if can_bomb_for_mining(board, unit):
-            print(f'unit {unit.id} bomb for mining')
+            #print(f'unit {unit.id} bomb for mining')
             await do_bomb(board, unit)
             units_done.append(unit)
 
@@ -621,18 +621,18 @@ async def act(board, units): # TODORMA
     for unit in [u for u in units if u not in units_done]:
         mining_goal = check_for_mining_goal(board, unit)
         if mining_goal:
-            print(f'unit {unit.id} goal: mining {mining_goal.x},{mining_goal.y}')
-            print('N1', len(units_done), round((time.time() - start_time) * 1000))
+            #print(f'unit {unit.id} goal: mining {mining_goal.x},{mining_goal.y}')
+            #print('N1', len(units_done), round((time.time() - start_time) * 1000))
             await do_move(board, unit, mining_goal)
             #asyncio.ensure_future(do_move(board, unit, mining_goal))
-            print('N2', len(units_done), round((time.time() - start_time) * 1000))
+            #print('N2', len(units_done), round((time.time() - start_time) * 1000))
             units_done.append(unit)
 
     #print('O', len(units_done), round((time.time() - start_time) * 1000))
     for unit in [u for u in units if u not in units_done]:
         any_safe_goal = check_for_any_safe_goal(board, unit)
         if any_safe_goal:
-            print(f'unit {unit.id} goal: anything safe {any_safe_goal.x},{any_safe_goal.y}')
+            #print(f'unit {unit.id} goal: anything safe {any_safe_goal.x},{any_safe_goal.y}')
             await do_move(board, unit, any_safe_goal)
             units_done.append(units)
 

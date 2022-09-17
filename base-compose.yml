@@ -6,10 +6,6 @@ services:
             - type: "bind"
               source: ./agents/replay.json
               target: /app/replay.json
-    go-agent:
-        build:
-            context: agents/go
-            dockerfile: Dockerfile
 
     python3-agent:
         build:
@@ -53,13 +49,13 @@ services:
         #volumes: # ra
         #    - ./agents/python3_5:/app #ra
 
-    python3_6-agent:
+    beneficial_increase-agent:
         build:
-            context: agents/python3_6
+            context: agents/beneficial_increase
             dockerfile: Dockerfile
             dockerfile: Dockerfile.dev # ra
         volumes: # ra
-            - ./agents/python3_6:/app #ra
+            - ./agents/beneficial_increase:/app #ra
 
     python3_7-agent:
         build:
@@ -69,45 +65,10 @@ services:
         volumes: # ra
             - ./agents/python3_7:/app #ra
 
-
-
-    python3-agent-dev:
+    python3_8-agent:
         build:
-            context: agents/python3
-            dockerfile: Dockerfile.dev
-        volumes:
-            - ./agents/python3:/app
-    python3-fwd:
-        build:
-            context: agents/python3
-            dockerfile: Dockerfile.fwd
-    python3-fwd-dev:
-        build:
-            context: agents/python3
-            dockerfile: Dockerfile.fwd.dev
-        volumes:
-            - ./agents/python3:/app
-    python3-gym-dev:
-        build:
-            context: agents/python3
-            dockerfile: Dockerfile.gym.dev
-        volumes:
-            - ./agents/python3:/app
-    typescript-agent:
-        build:
-            context: agents/typescript
+            context: agents/python3_8
             dockerfile: Dockerfile
-    typescript-agent-dev:
-        build:
-            context: agents/typescript
-            dockerfile: Dockerfile.dev
-        volumes:
-            - ./agents/typescript:/app
-    cpp-agent:
-        build:
-            context: agents/cpp
-            dockerfile: Dockerfile
-    rust-agent:
-        build:
-            context: agents/rust
-            dockerfile: Dockerfile
+            dockerfile: Dockerfile.dev # ra
+        volumes: # ra
+            - ./agents/python3_8:/app #ra

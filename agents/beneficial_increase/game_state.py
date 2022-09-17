@@ -214,17 +214,17 @@ class Cell:
                     new_cell.safe_dists[temp_id] = (new_dist, cell)
                     heapq.heappush(queue, (new_dist, random.random(), new_cell))
 
-        if self.unit:
-            safe_paths = safe_at_dist
-            print(f'unit {self.unit.id} safe paths:  (inv:{self.unit.invulnerable} stun:{self.unit.stunned})')
-            for i in range(len(safe_paths)):
-                s = f'{i} ({len(safe_paths[i])}): '
-                safe_paths[i].sort(key = lambda x: 100 * x.y + x.x)
-                for c in safe_paths[i]:
-                    if not c.future_fire_start:
-                        s = s + '*'
-                    s = s + f'({c.x},{c.y}), '
-                print(s)
+        #if self.unit:
+        #    safe_paths = safe_at_dist
+        #    print(f'unit {self.unit.id} safe paths:  (inv:{self.unit.invulnerable} stun:{self.unit.stunned})')
+        #    for i in range(len(safe_paths)):
+        #        s = f'{i} ({len(safe_paths[i])}): '
+        #        safe_paths[i].sort(key = lambda x: 100 * x.y + x.x)
+        #        for c in safe_paths[i]:
+        #            if not c.future_fire_start:
+        #                s = s + '*'
+        #            s = s + f'({c.x},{c.y}), '
+        #        print(s)
 
         safe_cell_set = set()
         truly_safe_cell_set = set()
@@ -763,14 +763,14 @@ class GameState:
             #self.board.tick = game_tick.get("tick")
             await self._tick_callback(self.board)
 
-        print(f'Tick {self.board.tick} handled in {round(1000 * (time.time() - self.board.tick_start))}ms')
-        sa, sb = '', ''
-        for unit_id, unit in self.board.units.items():
-            if unit.player.id == 'a':
-                sa = sa + f'{unit.hp} '
-            else:
-                sb = sb + f'{unit.hp} '
-        print(f'A: {sa}, B: {sb}')
+        #print(f'Tick {self.board.tick} handled in {round(1000 * (time.time() - self.board.tick_start))}ms')
+        #sa, sb = '', ''
+        #for unit_id, unit in self.board.units.items():
+        #    if unit.player.id == 'a':
+        #        sa = sa + f'{unit.hp} '
+        #    else:
+        #        sb = sb + f'{unit.hp} '
+        #print(f'A: {sa}, B: {sb}')
 
     def _on_unit_action(self, action_packet):
         '''Update units based on movement. Can ignore bomb/detonate actions (handled elsewhere)'''
